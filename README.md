@@ -92,6 +92,27 @@ npm test              # T-000 + the full 52-scenario suite (67 assertions total)
   still gated before GA; the compensating nightly detector
   (`detect_cross_account_duplicates`) is live, as the test report requires.
 
+## Phase 2 — Mobile app (complete)
+
+`mobile/` is an Expo (React Native + TypeScript) app recreating all 14 design
+screens pixel-perfect from the handoff prototypes, using the README design
+tokens (IBM Plex Sans/Mono, the green/gold palette) with fixtures ported
+verbatim from each prototype's Component class:
+
+Dashboard · AP · AI Invoice Processing · Email Ingestion · Approval Workflow ·
+Treasury · Banking · AI Classification · Reconciliation · POS · Reports ·
+Financial AI · Intelligence · Health Score
+
+Run it: `cd mobile && npm install && npx expo start` (web preview renders a
+430px design-review frame with a module switcher below the phone frame).
+All figures are mock development data — the MOCK DATA badges come off in
+production. AI surfaces only ever propose with visible confidence; approvals,
+payments and financial writes stay human.
+
+Prototype bugs fixed in the port (documented in the commits): Treasury
+calendar date matching (one payment leaked onto three days) and the POS
+tender-check formula (spec says tender = gross + tax + tips).
+
 ## CI as release gate
 
 `.github/workflows/ci.yml` boots a clean `postgres:16`, applies every
