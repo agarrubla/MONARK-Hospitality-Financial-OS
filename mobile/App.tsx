@@ -13,38 +13,39 @@ import {
 } from '@expo-google-fonts/ibm-plex-sans';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Platform, Pressable, SafeAreaView, Text, View } from 'react-native';
+import { Platform, SafeAreaView, View } from 'react-native';
+import { ModuleDock } from './src/navigation/ModuleDock';
+import AIClassificationScreen from './src/screens/AIClassificationScreen';
+import AIInvoiceScreen from './src/screens/AIInvoiceScreen';
 import APScreen from './src/screens/APScreen';
 import ApprovalWorkflowScreen from './src/screens/ApprovalWorkflowScreen';
 import BankingScreen from './src/screens/BankingScreen';
-import ReconciliationScreen from './src/screens/ReconciliationScreen';
-import POSScreen from './src/screens/POSScreen';
-import ReportsScreen from './src/screens/ReportsScreen';
-import AIInvoiceScreen from './src/screens/AIInvoiceScreen';
-import EmailIngestionScreen from './src/screens/EmailIngestionScreen';
-import AIClassificationScreen from './src/screens/AIClassificationScreen';
-import FinancialAIScreen from './src/screens/FinancialAIScreen';
-import IntelligenceScreen from './src/screens/IntelligenceScreen';
-import HealthScoreScreen from './src/screens/HealthScoreScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
+import EmailIngestionScreen from './src/screens/EmailIngestionScreen';
+import FinancialAIScreen from './src/screens/FinancialAIScreen';
+import HealthScoreScreen from './src/screens/HealthScoreScreen';
+import IntelligenceScreen from './src/screens/IntelligenceScreen';
+import POSScreen from './src/screens/POSScreen';
+import ReconciliationScreen from './src/screens/ReconciliationScreen';
+import ReportsScreen from './src/screens/ReportsScreen';
 import TreasuryScreen from './src/screens/TreasuryScreen';
-import { colors, fMono } from './src/theme/tokens';
+import { colors } from './src/theme/tokens';
 
 const modules = [
-  { key: 'dashboard', label: 'DASHBOARD', Screen: DashboardScreen },
-  { key: 'ap', label: 'AP', Screen: APScreen },
-  { key: 'approvals', label: 'APPROVALS', Screen: ApprovalWorkflowScreen },
-  { key: 'treasury', label: 'TREASURY', Screen: TreasuryScreen },
-  { key: 'banking', label: 'BANKING', Screen: BankingScreen },
-  { key: 'recon', label: 'RECON', Screen: ReconciliationScreen },
-  { key: 'pos', label: 'POS', Screen: POSScreen },
-  { key: 'reports', label: 'REPORTS', Screen: ReportsScreen },
-  { key: 'aiinvoice', label: 'AI INV', Screen: AIInvoiceScreen },
-  { key: 'email', label: 'EMAIL', Screen: EmailIngestionScreen },
-  { key: 'aiclass', label: 'AI CLASS', Screen: AIClassificationScreen },
-  { key: 'finai', label: 'FIN AI', Screen: FinancialAIScreen },
-  { key: 'intel', label: 'INTEL', Screen: IntelligenceScreen },
-  { key: 'health', label: 'HEALTH', Screen: HealthScoreScreen },
+  { key: 'dashboard', label: 'HOME', icon: '◈', Screen: DashboardScreen },
+  { key: 'ap', label: 'AP', icon: '▤', Screen: APScreen },
+  { key: 'approvals', label: 'APPROVE', icon: '⚖', Screen: ApprovalWorkflowScreen },
+  { key: 'treasury', label: 'TREASURY', icon: '⏷', Screen: TreasuryScreen },
+  { key: 'banking', label: 'BANKING', icon: '≋', Screen: BankingScreen },
+  { key: 'recon', label: 'RECON', icon: '⇄', Screen: ReconciliationScreen },
+  { key: 'pos', label: 'POS', icon: '◉', Screen: POSScreen },
+  { key: 'reports', label: 'REPORTS', icon: '◔', Screen: ReportsScreen },
+  { key: 'aiinvoice', label: 'AI INV', icon: '◇', Screen: AIInvoiceScreen },
+  { key: 'email', label: 'EMAIL', icon: '✉', Screen: EmailIngestionScreen },
+  { key: 'aiclass', label: 'CLASSIFY', icon: '⚙', Screen: AIClassificationScreen },
+  { key: 'finai', label: 'ASK AI', icon: 'M', Screen: FinancialAIScreen },
+  { key: 'intel', label: 'ALERTS', icon: '◎', Screen: IntelligenceScreen },
+  { key: 'health', label: 'SCORE', icon: '♡', Screen: HealthScoreScreen },
 ] as const;
 
 type ModuleKey = (typeof modules)[number]['key'];
@@ -65,27 +66,21 @@ export default function App() {
 
   const Screen = modules.find((m) => m.key === moduleKey)!.Screen;
 
+  const app = (
+    <View style={{ flex: 1, backgroundColor: colors.appBg }}>
+      <View style={{ flex: 1 }}>
+        <Screen key={moduleKey} />
+      </View>
+      <ModuleDock modules={modules} activeKey={moduleKey} onSelect={(k) => setModuleKey(k as ModuleKey)} />
+    </View>
+  );
+
   if (Platform.OS === 'web') {
     // Design-review frame: the prototypes target a 430px iPhone frame.
-    // The module switcher lives OUTSIDE the frame — it is review tooling,
-    // not part of the design.
     return (
       <View style={{ flex: 1, backgroundColor: colors.pageBg, alignItems: 'center', justifyContent: 'center', paddingVertical: 24 }}>
-        <View style={{ width: 430, height: 880, maxHeight: '92%' as unknown as number, borderRadius: 40, overflow: 'hidden', borderWidth: 1, borderColor: '#d8d5cc' }}>
-          <Screen />
-        </View>
-        <View style={{ flexDirection: 'row', gap: 6, marginTop: 12 }}>
-          {modules.map((m) => (
-            <Pressable
-              key={m.key}
-              onPress={() => setModuleKey(m.key)}
-              style={{ borderRadius: 6, paddingVertical: 5, paddingHorizontal: 10, backgroundColor: moduleKey === m.key ? colors.ink : '#dcd9d0' }}
-            >
-              <Text style={{ ...fMono(600, 10, 0.06), color: moduleKey === m.key ? colors.gold : colors.textSecondary }}>
-                {m.label}
-              </Text>
-            </Pressable>
-          ))}
+        <View style={{ width: 430, height: 880, maxHeight: '96%' as unknown as number, borderRadius: 40, overflow: 'hidden', borderWidth: 1, borderColor: '#d8d5cc' }}>
+          {app}
         </View>
       </View>
     );
@@ -94,7 +89,7 @@ export default function App() {
   return (
     <SafeAreaView style={{ flex: 1, backgroundColor: colors.ink }}>
       <StatusBar style="light" />
-      <Screen />
+      {app}
     </SafeAreaView>
   );
 }
