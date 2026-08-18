@@ -23,6 +23,7 @@ import ReportsScreen from './src/screens/ReportsScreen';
 import AIInvoiceScreen from './src/screens/AIInvoiceScreen';
 import EmailIngestionScreen from './src/screens/EmailIngestionScreen';
 import AIClassificationScreen from './src/screens/AIClassificationScreen';
+import FinancialAIScreen from './src/screens/FinancialAIScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import TreasuryScreen from './src/screens/TreasuryScreen';
 import { colors, fMono } from './src/theme/tokens';
@@ -39,6 +40,7 @@ const modules = [
   { key: 'aiinvoice', label: 'AI INV', Screen: AIInvoiceScreen },
   { key: 'email', label: 'EMAIL', Screen: EmailIngestionScreen },
   { key: 'aiclass', label: 'AI CLASS', Screen: AIClassificationScreen },
+  { key: 'finai', label: 'FIN AI', Screen: FinancialAIScreen },
 ] as const;
 
 type ModuleKey = (typeof modules)[number]['key'];
