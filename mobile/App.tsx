@@ -15,12 +15,14 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { Platform, Pressable, SafeAreaView, Text, View } from 'react-native';
 import APScreen from './src/screens/APScreen';
+import ApprovalWorkflowScreen from './src/screens/ApprovalWorkflowScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import { colors, fMono } from './src/theme/tokens';
 
 const modules = [
   { key: 'dashboard', label: 'DASHBOARD', Screen: DashboardScreen },
   { key: 'ap', label: 'AP', Screen: APScreen },
+  { key: 'approvals', label: 'APPROVALS', Screen: ApprovalWorkflowScreen },
 ] as const;
 
 type ModuleKey = (typeof modules)[number]['key'];
