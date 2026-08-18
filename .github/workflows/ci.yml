@@ -1,0 +1,45 @@
+# Financial Integrity suite — release blocker.
+# Applies every migration from zero against a fresh PostgreSQL 16 and runs the
+# full 52-test suite (T-000 first). A red run blocks the release.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  financial-integrity:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: monark
+          POSTGRES_PASSWORD: monark
+          POSTGRES_DB: monark_dev
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U monark -d monark_dev"
+          --health-interval 2s
+          --health-timeout 2s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgres://monark:monark@localhost:5432/monark_dev
+      ADMIN_DATABASE_URL: postgres://monark:monark@localhost:5432/monark_dev
+      TEST_DATABASE_URL: postgres://monark:monark@localhost:5432/monark_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run typecheck
+      - name: Apply all migrations from scratch
+        run: npm run db:reset
+      - name: T-000 · critical cross-month invoice test
+        run: npm run test:t000
+      - name: Full financial integrity suite (release blocker)
+        run: npm test

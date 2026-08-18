@@ -1,0 +1,36 @@
+-- 002 · Enum types, as specified inline in Database Architecture v1.0.
+
+CREATE TYPE org_status AS ENUM ('active', 'suspended');
+CREATE TYPE auth_provider AS ENUM ('password', 'google', 'sso_saml');
+CREATE TYPE user_status AS ENUM ('active', 'disabled');
+CREATE TYPE location_scope_type AS ENUM ('all', 'listed');
+CREATE TYPE membership_status AS ENUM ('invited', 'active', 'revoked');
+CREATE TYPE concept_type AS ENUM ('restaurant', 'bar', 'cafe', 'qsr', 'catering', 'other');
+CREATE TYPE active_closed_status AS ENUM ('active', 'closed');
+CREATE TYPE pos_provider AS ENUM ('toast', 'square', 'clover', 'lightspeed', 'none');
+CREATE TYPE bank_account_type AS ENUM ('checking', 'savings', 'credit_card', 'money_market');
+CREATE TYPE bank_account_status AS ENUM ('active', 'disconnected', 'closed');
+CREATE TYPE bank_txn_match_status AS ENUM ('unmatched', 'matched_payment', 'matched_deposit', 'excluded');
+CREATE TYPE vendor_status AS ENUM ('active', 'archived');
+CREATE TYPE statement_group AS ENUM ('cogs', 'labor', 'occupancy', 'opex', 'gna', 'other_income', 'other');
+CREATE TYPE invoice_status AS ENUM ('draft', 'pending_approval', 'approved', 'scheduled', 'partially_paid', 'paid', 'void');
+CREATE TYPE invoice_source AS ENUM ('upload', 'email_capture', 'integration', 'manual');
+CREATE TYPE approval_subject_type AS ENUM ('invoice', 'payment', 'rule_change', 'budget', 'period_lock');
+CREATE TYPE approval_decision AS ENUM ('pending', 'approved', 'rejected');
+CREATE TYPE payment_method AS ENUM ('ach', 'check', 'wire', 'card', 'cash');
+CREATE TYPE payment_status AS ENUM ('scheduled', 'pending_approval', 'processing', 'settled', 'failed', 'voided');
+CREATE TYPE match_actor AS ENUM ('system', 'user');
+CREATE TYPE pos_source AS ENUM ('toast', 'square', 'clover', 'lightspeed', 'manual');
+CREATE TYPE deposit_type AS ENUM ('card_batch', 'cash_deposit');
+CREATE TYPE deposit_status AS ENUM ('expected', 'matched', 'variance', 'missing');
+CREATE TYPE period_status AS ENUM ('open', 'closing', 'locked');
+CREATE TYPE budget_basis AS ENUM ('fixed', 'pct_of_net_sales');
+CREATE TYPE insight_kind AS ENUM ('anomaly', 'duplicate_risk', 'price_increase', 'deposit_variance', 'cash_risk', 'budget_variance', 'recommendation');
+CREATE TYPE insight_severity AS ENUM ('info', 'warning', 'critical');
+CREATE TYPE insight_status AS ENUM ('new', 'acknowledged', 'actioned', 'dismissed');
+CREATE TYPE notification_kind AS ENUM ('approval_request', 'payment_status', 'insight', 'deposit_variance', 'period_close', 'system');
+CREATE TYPE document_source AS ENUM ('upload', 'email_capture', 'integration');
+CREATE TYPE ocr_status AS ENUM ('pending', 'parsed', 'failed', 'skipped');
+CREATE TYPE integration_provider AS ENUM ('plaid', 'toast', 'square', 'clover', 'lightspeed', 'quickbooks', 'xero', 'netsuite', 'gusto', 'adp', 'stripe', 'other');
+CREATE TYPE integration_status AS ENUM ('connected', 'error', 'reauth_required', 'disconnected');
+CREATE TYPE audit_actor_type AS ENUM ('user', 'system', 'ai', 'integration');
