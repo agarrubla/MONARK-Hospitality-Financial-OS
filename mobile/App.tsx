@@ -20,6 +20,7 @@ import BankingScreen from './src/screens/BankingScreen';
 import ReconciliationScreen from './src/screens/ReconciliationScreen';
 import POSScreen from './src/screens/POSScreen';
 import ReportsScreen from './src/screens/ReportsScreen';
+import AIInvoiceScreen from './src/screens/AIInvoiceScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import TreasuryScreen from './src/screens/TreasuryScreen';
 import { colors, fMono } from './src/theme/tokens';
@@ -33,6 +34,7 @@ const modules = [
   { key: 'recon', label: 'RECON', Screen: ReconciliationScreen },
   { key: 'pos', label: 'POS', Screen: POSScreen },
   { key: 'reports', label: 'REPORTS', Screen: ReportsScreen },
+  { key: 'aiinvoice', label: 'AI INV', Screen: AIInvoiceScreen },
 ] as const;
 
 type ModuleKey = (typeof modules)[number]['key'];
