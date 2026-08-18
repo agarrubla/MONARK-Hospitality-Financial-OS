@@ -17,12 +17,14 @@ import { Platform, Pressable, SafeAreaView, Text, View } from 'react-native';
 import APScreen from './src/screens/APScreen';
 import ApprovalWorkflowScreen from './src/screens/ApprovalWorkflowScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
+import TreasuryScreen from './src/screens/TreasuryScreen';
 import { colors, fMono } from './src/theme/tokens';
 
 const modules = [
   { key: 'dashboard', label: 'DASHBOARD', Screen: DashboardScreen },
   { key: 'ap', label: 'AP', Screen: APScreen },
   { key: 'approvals', label: 'APPROVALS', Screen: ApprovalWorkflowScreen },
+  { key: 'treasury', label: 'TREASURY', Screen: TreasuryScreen },
 ] as const;
 
 type ModuleKey = (typeof modules)[number]['key'];
