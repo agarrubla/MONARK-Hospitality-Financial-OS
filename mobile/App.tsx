@@ -17,6 +17,7 @@ import { Platform, Pressable, SafeAreaView, Text, View } from 'react-native';
 import APScreen from './src/screens/APScreen';
 import ApprovalWorkflowScreen from './src/screens/ApprovalWorkflowScreen';
 import BankingScreen from './src/screens/BankingScreen';
+import ReconciliationScreen from './src/screens/ReconciliationScreen';
 import DashboardScreen from './src/screens/DashboardScreen';
 import TreasuryScreen from './src/screens/TreasuryScreen';
 import { colors, fMono } from './src/theme/tokens';
@@ -27,6 +28,7 @@ const modules = [
   { key: 'approvals', label: 'APPROVALS', Screen: ApprovalWorkflowScreen },
   { key: 'treasury', label: 'TREASURY', Screen: TreasuryScreen },
   { key: 'banking', label: 'BANKING', Screen: BankingScreen },
+  { key: 'recon', label: 'RECON', Screen: ReconciliationScreen },
 ] as const;
 
 type ModuleKey = (typeof modules)[number]['key'];
