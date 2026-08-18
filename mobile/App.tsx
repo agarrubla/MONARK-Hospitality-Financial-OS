@@ -13,45 +13,63 @@ import {
 } from '@expo-google-fonts/ibm-plex-sans';
 import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
-import { Platform, SafeAreaView, View } from 'react-native';
+import { Platform, SafeAreaView, useWindowDimensions, View } from 'react-native';
 import { ModuleDock } from './src/navigation/ModuleDock';
-import AIClassificationScreen from './src/screens/AIClassificationScreen';
-import AIInvoiceScreen from './src/screens/AIInvoiceScreen';
-import APScreen from './src/screens/APScreen';
-import ApprovalWorkflowScreen from './src/screens/ApprovalWorkflowScreen';
-import BankingScreen from './src/screens/BankingScreen';
-import DashboardScreen from './src/screens/DashboardScreen';
-import EmailIngestionScreen from './src/screens/EmailIngestionScreen';
-import FinancialAIScreen from './src/screens/FinancialAIScreen';
-import HealthScoreScreen from './src/screens/HealthScoreScreen';
-import IntelligenceScreen from './src/screens/IntelligenceScreen';
-import POSScreen from './src/screens/POSScreen';
-import ReconciliationScreen from './src/screens/ReconciliationScreen';
-import ReportsScreen from './src/screens/ReportsScreen';
-import TreasuryScreen from './src/screens/TreasuryScreen';
+import LiveAPScreen from './src/screens/live/LiveAPScreen';
+import LiveDashboardScreen from './src/screens/live/LiveDashboardScreen';
+import LivePOSScreen from './src/screens/live/LivePOSScreen';
+import LiveReportsScreen from './src/screens/live/LiveReportsScreen';
+import LiveTreasuryScreen from './src/screens/live/LiveTreasuryScreen';
+import PlaceholderScreen from './src/screens/live/PlaceholderScreen';
+import { StoreProvider } from './src/store/store';
 import { colors } from './src/theme/tokens';
 
+const Banking = () => (
+  <PlaceholderScreen
+    title="BANKING" sub="Cuentas y movimientos bancarios" icon="≋"
+    blurb="Aquí verás tus cuentas, saldos y cada movimiento del banco, conciliados contra tus pagos y depósitos."
+    activates="Conectar tus cuentas bancarias (vía Plaid u otro agregador). Los movimientos entran solos cada mañana y se cruzan con lo que registraste — el banco es evidencia, nunca un gasto nuevo."
+  />
+);
+const Recon = () => (
+  <PlaceholderScreen
+    title="RECONCILIATION" sub="Cruce pagos ↔ banco ↔ POS" icon="⇄"
+    blurb="El motor de conciliación cruza tus pagos y ventas contra los movimientos reales del banco y te avisa de cualquier diferencia."
+    activates="Requiere la conexión bancaria. Con banco conectado, cada pago que registres se confirma contra su débito real, y cada depósito de ventas contra su abono."
+  />
+);
+const AIModules = () => (
+  <PlaceholderScreen
+    title="AI · AUTOMATIZACIÓN" sub="OCR de facturas · email · clasificación" icon="◇"
+    blurb="La IA leerá facturas desde foto/PDF/email, sugerirá categorías con confianza visible y detectará duplicados — tú siempre decides."
+    activates="Requiere el backend en producción (ya está construido y probado). La IA nunca aprueba ni paga: solo propone."
+  />
+);
+const Insights = () => (
+  <PlaceholderScreen
+    title="INTELLIGENCE" sub="Alertas y health score" icon="◎"
+    blurb="Detectores proactivos (costos, caja, duplicados, varianzas) y un score de salud explicable de tu negocio."
+    activates="Se calcula solo cuando tengas algunas semanas de datos registrados — más datos, mejores alertas."
+  />
+);
+
 const modules = [
-  { key: 'dashboard', label: 'HOME', icon: '◈', Screen: DashboardScreen },
-  { key: 'ap', label: 'AP', icon: '▤', Screen: APScreen },
-  { key: 'approvals', label: 'APPROVE', icon: '⚖', Screen: ApprovalWorkflowScreen },
-  { key: 'treasury', label: 'TREASURY', icon: '⏷', Screen: TreasuryScreen },
-  { key: 'banking', label: 'BANKING', icon: '≋', Screen: BankingScreen },
-  { key: 'recon', label: 'RECON', icon: '⇄', Screen: ReconciliationScreen },
-  { key: 'pos', label: 'POS', icon: '◉', Screen: POSScreen },
-  { key: 'reports', label: 'REPORTS', icon: '◔', Screen: ReportsScreen },
-  { key: 'aiinvoice', label: 'AI INV', icon: '◇', Screen: AIInvoiceScreen },
-  { key: 'email', label: 'EMAIL', icon: '✉', Screen: EmailIngestionScreen },
-  { key: 'aiclass', label: 'CLASSIFY', icon: '⚙', Screen: AIClassificationScreen },
-  { key: 'finai', label: 'ASK AI', icon: 'M', Screen: FinancialAIScreen },
-  { key: 'intel', label: 'ALERTS', icon: '◎', Screen: IntelligenceScreen },
-  { key: 'health', label: 'SCORE', icon: '♡', Screen: HealthScoreScreen },
+  { key: 'dashboard', label: 'HOME', icon: '◈', Screen: LiveDashboardScreen },
+  { key: 'pos', label: 'VENTAS', icon: '◉', Screen: LivePOSScreen },
+  { key: 'ap', label: 'FACTURAS', icon: '▤', Screen: LiveAPScreen },
+  { key: 'treasury', label: 'PAGOS', icon: '⏷', Screen: LiveTreasuryScreen },
+  { key: 'reports', label: 'REPORTES', icon: '◔', Screen: LiveReportsScreen },
+  { key: 'banking', label: 'BANCO', icon: '≋', Screen: Banking },
+  { key: 'recon', label: 'CONCILIAR', icon: '⇄', Screen: Recon },
+  { key: 'ai', label: 'AI', icon: '◇', Screen: AIModules },
+  { key: 'intel', label: 'ALERTAS', icon: '◎', Screen: Insights },
 ] as const;
 
 type ModuleKey = (typeof modules)[number]['key'];
 
 export default function App() {
   const [moduleKey, setModuleKey] = useState<ModuleKey>('dashboard');
+  const { width } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
     IBMPlexSans_400Regular,
     IBMPlexSans_500Medium,
@@ -67,16 +85,22 @@ export default function App() {
   const Screen = modules.find((m) => m.key === moduleKey)!.Screen;
 
   const app = (
-    <View style={{ flex: 1, backgroundColor: colors.appBg }}>
-      <View style={{ flex: 1 }}>
-        <Screen key={moduleKey} />
+    <StoreProvider>
+      <View style={{ flex: 1, backgroundColor: colors.appBg }}>
+        <View style={{ flex: 1 }}>
+          <Screen key={moduleKey} />
+        </View>
+        <ModuleDock modules={modules} activeKey={moduleKey} onSelect={(k) => setModuleKey(k as ModuleKey)} />
       </View>
-      <ModuleDock modules={modules} activeKey={moduleKey} onSelect={(k) => setModuleKey(k as ModuleKey)} />
-    </View>
+    </StoreProvider>
   );
 
   if (Platform.OS === 'web') {
-    // Design-review frame: the prototypes target a 430px iPhone frame.
+    // Narrow viewports (a phone browser, a small window): the app fills the
+    // screen like a real app. Wide screens get the centered review frame.
+    if (width < 560) {
+      return <View style={{ flex: 1, backgroundColor: colors.appBg }}>{app}</View>;
+    }
     return (
       <View style={{ flex: 1, backgroundColor: colors.pageBg, alignItems: 'center', justifyContent: 'center', paddingVertical: 24 }}>
         <View style={{ width: 430, height: 880, maxHeight: '96%' as unknown as number, borderRadius: 40, overflow: 'hidden', borderWidth: 1, borderColor: '#d8d5cc' }}>
