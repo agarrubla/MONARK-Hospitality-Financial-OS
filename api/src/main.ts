@@ -4,13 +4,13 @@
  */
 import pg from 'pg';
 import { pgConfig, runMigrations } from '../../scripts/migrate.js';
-import { buildServer, createSessionRegistry } from './server.js';
+import { buildProductApp } from './app.js';
 
 async function main() {
   await runMigrations();
 
   const pool = new pg.Pool({ ...pgConfig(), max: 10 });
-  const app = buildServer(pool, createSessionRegistry());
+  const app = buildProductApp(pool);
 
   // Unauthenticated liveness probe (no data, no permissions involved).
   app.get('/health', async () => {
