@@ -175,6 +175,29 @@ export function buildServer(pool: pg.Pool, sessions: SessionRegistry): FastifyIn
 
   secureRoute({
     method: 'POST',
+    url: '/integrations/:id/sync-bank',
+    permission: 'bank.admin', // sensitive → step-up enforced above
+    handler: async (req) => {
+      const { id } = req.params as { id: string };
+      const { syncBankIntegration } = await import('./integrations/sync.js');
+      return syncBankIntegration(pool, id);
+    },
+  });
+
+  secureRoute({
+    method: 'POST',
+    url: '/integrations/:id/sync-pos',
+    permission: 'bank.admin',
+    handler: async (req) => {
+      const { id } = req.params as { id: string };
+      const { businessDate } = req.body as { businessDate: string };
+      const { syncPosIntegration } = await import('./integrations/sync.js');
+      return syncPosIntegration(pool, id, businessDate);
+    },
+  });
+
+  secureRoute({
+    method: 'POST',
     url: '/approvals/:id/decide',
     permission: 'payment.approve', // sensitive → step-up enforced above
     handler: async (req, _reply, session) => {
