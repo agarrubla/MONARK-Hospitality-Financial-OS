@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "MONARK Hospitality Financial OS — backend (Phase 1: schema, integrity triggers, RLS/RBAC, financial integrity test suite)",
+  "description": "MONARK Hospitality Financial OS \u2014 backend (Phase 1: schema, integrity triggers, RLS/RBAC, financial integrity test suite)",
   "engines": {
     "node": ">=22"
   },
@@ -12,16 +12,17 @@
     "db:reset": "tsx scripts/migrate.ts --reset",
     "test": "vitest run",
     "test:t000": "vitest run tests/t000.critical.test.ts",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "start": "tsx api/src/main.ts"
   },
   "dependencies": {
     "fastify": "^5.2.0",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "tsx": "^4.19.2"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
     "@types/pg": "^8.11.10",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2",
     "vitest": "^3.0.5"
   }

@@ -15,9 +15,14 @@ const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '..', 'db',
 const DATABASE_URL =
   process.env.DATABASE_URL ?? 'postgres://monark:monark@localhost:5432/monark_dev';
 
-async function main() {
-  const reset = process.argv.includes('--reset');
-  const client = new pg.Client({ connectionString: DATABASE_URL });
+/** SSL for managed hosts; plain for localhost/internal networking. */
+export function pgConfig(url: string = DATABASE_URL): pg.ClientConfig {
+  const local = url.includes('localhost') || url.includes('127.0.0.1') || url.includes('.internal');
+  return { connectionString: url, ssl: local ? undefined : { rejectUnauthorized: false } };
+}
+
+export async function runMigrations({ reset = false } = {}): Promise<void> {
+  const client = new pg.Client(pgConfig());
   await client.connect();
   try {
     if (reset) {
@@ -58,7 +63,10 @@ async function main() {
   }
 }
 
-main().catch((err) => {
-  console.error(err);
-  process.exit(1);
-});
+// Run directly (npm run db:migrate / db:reset); importable for boot-time use.
+if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+  runMigrations({ reset: process.argv.includes('--reset') }).catch((err) => {
+    console.error(err);
+    process.exit(1);
+  });
+}
