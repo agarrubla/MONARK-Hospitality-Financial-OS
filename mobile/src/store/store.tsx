@@ -1,60 +1,59 @@
 /**
- * Live data store — the app starts EMPTY and the user feeds it.
- * Persisted on-device (localStorage on web, AsyncStorage on native).
- *
- * The core invariant is enforced here, exactly as in the backend:
- * one transaction = one financial event. An invoice hits the P&L in its
- * EXPENSE month; a payment hits cash flow in its PAYMENT month; paying an
- * August invoice in September never creates a September expense.
+ * Cloud-backed data store. The app reads/writes through the MONARK API;
+ * PostgreSQL enforces the core invariant server-side: an invoice hits the
+ * P&L in its EXPENSE month, a payment hits cash in its PAYMENT month —
+ * paying an August invoice in September never creates a September expense.
  */
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
+import { api, ApiError, clearToken, getToken, setToken } from '../api/client';
 
 export interface Location { id: string; name: string; code: string }
-export interface Vendor { id: string; name: string; termsDays: number }
-export interface Category { id: string; name: string; group: 'cogs' | 'labor' | 'occupancy' | 'opex' | 'gna' }
+export interface Vendor { id: string; name: string }
+export interface Category { id: string; name: string; group: string }
 
-export type InvoiceStatus = 'pending_approval' | 'approved' | 'scheduled' | 'paid' | 'rejected' | 'on_hold';
+export type InvoiceStatus = 'pending_approval' | 'approved' | 'paid' | 'rejected' | 'on_hold';
 
 export interface Invoice {
   id: string;
   vendorId: string;
   locationId: string;
   number: string;
-  invoiceDate: string; // YYYY-MM-DD
-  expenseDate: string; // YYYY-MM-DD → drives the P&L month
+  invoiceDate: string;
+  expenseDate: string;
   dueDate: string;
   categoryId: string;
   description: string;
   subtotal: number;
   tax: number;
   status: InvoiceStatus;
-  scheduledFor?: string;
+  createdAt: string;
+  paymentDate?: string | null;
+  paymentMethod?: string | null;
+  paymentRef?: string | null;
   history: Array<{ action: string; when: string }>;
 }
 
 export interface Payment {
   id: string;
   invoiceId: string;
-  date: string; // YYYY-MM-DD → drives the cash month
-  method: 'ach' | 'check' | 'wire' | 'card' | 'cash';
+  date: string;
+  method: string;
   amount: number;
-  ref?: string;
+  ref?: string | null;
 }
 
 export interface PosDay {
   id: string;
   locationId: string;
-  date: string; // YYYY-MM-DD business date
+  date: string;
   gross: number;
   discounts: number;
   tax: number;
   tips: number;
-  food: number;
-  bev: number;
 }
 
 interface AppData {
+  orgName: string;
   locations: Location[];
   vendors: Vendor[];
   categories: Category[];
@@ -63,32 +62,9 @@ interface AppData {
   posDays: PosDay[];
 }
 
-/** Standard restaurant chart of categories — structure, not data. */
-const seedCategories: Category[] = [
-  { id: 'c-food', name: 'COGS · Food', group: 'cogs' },
-  { id: 'c-bev', name: 'COGS · Beverage', group: 'cogs' },
-  { id: 'c-labor', name: 'Labor', group: 'labor' },
-  { id: 'c-rent', name: 'Rent & occupancy', group: 'occupancy' },
-  { id: 'c-util', name: 'Utilities', group: 'opex' },
-  { id: 'c-supplies', name: 'Supplies', group: 'opex' },
-  { id: 'c-services', name: 'Services & maintenance', group: 'opex' },
-  { id: 'c-fees', name: 'Fees & processing', group: 'gna' },
-  { id: 'c-other', name: 'Other', group: 'gna' },
-];
+const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [] };
 
-const EMPTY: AppData = {
-  locations: [],
-  vendors: [],
-  categories: seedCategories,
-  invoices: [],
-  payments: [],
-  posDays: [],
-};
-
-const STORAGE_KEY = 'monark.data.v1';
-
-export const uid = (): string => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
-export const monthOf = (isoDate: string): string => isoDate.slice(0, 7); // YYYY-MM
+export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
 export const todayISO = (): string => new Date().toISOString().slice(0, 10);
 export const money = (n: number): string =>
   (n < 0 ? '−$' : '$') + Math.abs(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -102,100 +78,137 @@ export function monthLabel(ym: string): string {
 interface StoreApi {
   data: AppData;
   ready: boolean;
-  addLocation(name: string, code: string): void;
-  addVendor(name: string, termsDays: number): Vendor;
-  addInvoice(inv: Omit<Invoice, 'id' | 'status' | 'history'>): void;
-  setInvoiceStatus(id: string, status: InvoiceStatus, note?: string, scheduledFor?: string): void;
-  recordPayment(invoiceId: string, date: string, method: Payment['method'], ref?: string): void;
-  addPosDay(day: Omit<PosDay, 'id'>): void;
-  resetAll(): void;
+  authed: boolean;
+  busy: boolean;
+  lastError: string | null;
+  clearError(): void;
+  register(email: string, password: string, orgName: string): Promise<void>;
+  login(email: string, password: string): Promise<void>;
+  logout(): Promise<void>;
+  refresh(): Promise<void>;
+  addLocation(name: string, code: string): Promise<void>;
+  addInvoice(inv: {
+    vendorId?: string; vendorName?: string; locationId: string; number: string;
+    invoiceDate: string; expenseDate: string; dueDate?: string;
+    categoryId: string; description?: string; subtotal: number; tax: number;
+  }): Promise<void>;
+  setInvoiceStatus(id: string, status: InvoiceStatus): Promise<void>;
+  recordPayment(invoiceId: string, date: string, method: string, ref?: string): Promise<void>;
+  addPosDay(day: { locationId: string; date: string; gross: number; discounts: number; tax: number; tips: number }): Promise<void>;
 }
 
 const StoreContext = createContext<StoreApi | null>(null);
 
+/** History shown in the invoice detail, derived from server facts. */
+function synthesizeHistory(i: Omit<Invoice, 'history'>): Invoice['history'] {
+  const h: Invoice['history'] = [];
+  if (i.paymentDate) h.push({ action: `Pagada · caja ${monthLabel(monthOf(i.paymentDate))}`, when: i.paymentDate });
+  if (i.status === 'rejected') h.push({ action: 'Rechazada', when: '' });
+  if (i.status === 'on_hold') h.push({ action: 'En pausa', when: '' });
+  if (i.status === 'approved' || i.status === 'paid') h.push({ action: 'Aprobada', when: '' });
+  h.push({ action: `Creada · gasto ${monthLabel(monthOf(i.expenseDate))}`, when: i.createdAt.slice(0, 10) });
+  return h;
+}
+
 export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [data, setData] = useState<AppData>(EMPTY);
   const [ready, setReady] = useState(false);
+  const [authed, setAuthed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
 
-  useEffect(() => {
-    AsyncStorage.getItem(STORAGE_KEY)
-      .then((raw) => {
-        if (raw) setData({ ...EMPTY, ...JSON.parse(raw) });
-      })
-      .catch(() => {})
-      .finally(() => setReady(true));
+  const refresh = useCallback(async () => {
+    const state = await api<AppData & { invoices: Array<Omit<Invoice, 'history'>> }>('GET', '/state');
+    setData({
+      ...state,
+      invoices: state.invoices.map((i) => ({ ...i, history: synthesizeHistory(i) })),
+    });
+    setAuthed(true);
   }, []);
 
-  const update = (fn: (d: AppData) => AppData) => {
-    setData((prev) => {
-      const next = fn(prev);
-      AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(next)).catch(() => {});
-      return next;
-    });
-  };
+  useEffect(() => {
+    (async () => {
+      try {
+        if (await getToken()) await refresh();
+      } catch (err) {
+        if (err instanceof ApiError && (err.status === 401 || err.status === 0)) {
+          if (err.status === 401) await clearToken();
+        }
+      } finally {
+        setReady(true);
+      }
+    })();
+  }, [refresh]);
 
-  const api = useMemo<StoreApi>(
-    () => ({
-      data,
-      ready,
-      addLocation: (name, code) =>
-        update((d) => ({ ...d, locations: [...d.locations, { id: uid(), name, code: code.toUpperCase() }] })),
-      addVendor: (name, termsDays) => {
-        const vendor: Vendor = { id: uid(), name, termsDays };
-        update((d) => ({ ...d, vendors: [...d.vendors, vendor] }));
-        return vendor;
-      },
-      addInvoice: (inv) =>
-        update((d) => ({
-          ...d,
-          invoices: [
-            {
-              ...inv,
-              id: uid(),
-              status: 'pending_approval',
-              history: [{ action: 'Created', when: todayISO() }],
-            },
-            ...d.invoices,
-          ],
-        })),
-      setInvoiceStatus: (id, status, note, scheduledFor) =>
-        update((d) => ({
-          ...d,
-          invoices: d.invoices.map((i) =>
-            i.id === id
-              ? {
-                  ...i,
-                  status,
-                  scheduledFor: scheduledFor ?? i.scheduledFor,
-                  history: [{ action: note ?? status, when: todayISO() }, ...i.history],
-                }
-              : i,
-          ),
-        })),
-      recordPayment: (invoiceId, date, method, ref) =>
-        update((d) => {
-          const inv = d.invoices.find((i) => i.id === invoiceId);
-          if (!inv) return d;
-          return {
-            ...d,
-            payments: [
-              { id: uid(), invoiceId, date, method, amount: inv.subtotal + inv.tax, ref },
-              ...d.payments,
-            ],
-            invoices: d.invoices.map((i) =>
-              i.id === invoiceId
-                ? { ...i, status: 'paid', history: [{ action: `Paid · cash month ${monthLabel(monthOf(date))}`, when: todayISO() }, ...i.history] }
-                : i,
-            ),
-          };
-        }),
-      addPosDay: (day) => update((d) => ({ ...d, posDays: [{ ...day, id: uid() }, ...d.posDays] })),
-      resetAll: () => update(() => EMPTY),
-    }),
-    [data, ready],
+  const run = useCallback(
+    async (fn: () => Promise<void>) => {
+      setBusy(true);
+      setLastError(null);
+      try {
+        await fn();
+      } catch (err) {
+        setLastError(err instanceof Error ? err.message : String(err));
+        throw err;
+      } finally {
+        setBusy(false);
+      }
+    },
+    [],
   );
 
-  return <StoreContext.Provider value={api}>{children}</StoreContext.Provider>;
+  const apiStore = useMemo<StoreApi>(
+    () => ({
+      data, ready, authed, busy, lastError,
+      clearError: () => setLastError(null),
+      register: (email, password, orgName) =>
+        run(async () => {
+          const res = await api<{ token: string }>('POST', '/auth/register', { email, password, orgName });
+          await setToken(res.token);
+          await refresh();
+        }),
+      login: (email, password) =>
+        run(async () => {
+          const res = await api<{ token: string }>('POST', '/auth/login', { email, password });
+          await setToken(res.token);
+          await refresh();
+        }),
+      logout: async () => {
+        await clearToken();
+        setAuthed(false);
+        setData(EMPTY);
+      },
+      refresh,
+      addLocation: (name, code) =>
+        run(async () => {
+          await api('POST', '/locations', { name, code });
+          await refresh();
+        }),
+      addInvoice: (inv) =>
+        run(async () => {
+          await api('POST', '/invoices', inv);
+          await refresh();
+        }),
+      setInvoiceStatus: (id, status) =>
+        run(async () => {
+          const action = { approved: 'approve', rejected: 'reject', on_hold: 'hold', pending_approval: 'reactivate', paid: 'approve' }[status];
+          await api('POST', `/invoices/${id}/decision`, { action });
+          await refresh();
+        }),
+      recordPayment: (invoiceId, date, method, ref) =>
+        run(async () => {
+          await api('POST', `/invoices/${invoiceId}/pay`, { date, method, ref });
+          await refresh();
+        }),
+      addPosDay: (day) =>
+        run(async () => {
+          await api('POST', '/pos-days', day);
+          await refresh();
+        }),
+    }),
+    [data, ready, authed, busy, lastError, refresh, run],
+  );
+
+  return <StoreContext.Provider value={apiStore}>{children}</StoreContext.Provider>;
 }
 
 export function useStore(): StoreApi {
@@ -204,11 +217,10 @@ export function useStore(): StoreApi {
   return ctx;
 }
 
-/* ── Derived financials (the invariant lives here) ─────────────────────── */
+/* ── Derived financials (mirror of the server-side invariant) ────────────── */
 
 export const invoiceTotal = (i: Invoice): number => i.subtotal + i.tax;
 
-/** Expenses by P&L month (expense date), only booked invoices — never by payment date. */
 export function expensesByMonth(d: AppData): Map<string, number> {
   const out = new Map<string, number>();
   for (const i of d.invoices) {
@@ -229,7 +241,6 @@ export function expensesByCategory(d: AppData, month?: string): Map<string, numb
   return out;
 }
 
-/** Revenue by month from POS days (net = gross − discounts). */
 export function revenueByMonth(d: AppData): Map<string, number> {
   const out = new Map<string, number>();
   for (const p of d.posDays) {
@@ -239,7 +250,6 @@ export function revenueByMonth(d: AppData): Map<string, number> {
   return out;
 }
 
-/** Cash out by month from payments (payment date) — never from expense dates. */
 export function cashOutByMonth(d: AppData): Map<string, number> {
   const out = new Map<string, number>();
   for (const p of d.payments) {
@@ -250,5 +260,5 @@ export function cashOutByMonth(d: AppData): Map<string, number> {
 }
 
 export function openAP(d: AppData): Invoice[] {
-  return d.invoices.filter((i) => ['approved', 'scheduled'].includes(i.status));
+  return d.invoices.filter((i) => i.status === 'approved');
 }

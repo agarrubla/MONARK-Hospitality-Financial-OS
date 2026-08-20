@@ -15,20 +15,21 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { Platform, SafeAreaView, useWindowDimensions, View } from 'react-native';
 import { ModuleDock } from './src/navigation/ModuleDock';
+import AuthScreen from './src/screens/live/AuthScreen';
 import LiveAPScreen from './src/screens/live/LiveAPScreen';
 import LiveDashboardScreen from './src/screens/live/LiveDashboardScreen';
 import LivePOSScreen from './src/screens/live/LivePOSScreen';
 import LiveReportsScreen from './src/screens/live/LiveReportsScreen';
 import LiveTreasuryScreen from './src/screens/live/LiveTreasuryScreen';
 import PlaceholderScreen from './src/screens/live/PlaceholderScreen';
-import { StoreProvider } from './src/store/store';
+import { StoreProvider, useStore } from './src/store/store';
 import { colors } from './src/theme/tokens';
 
 const Banking = () => (
   <PlaceholderScreen
     title="BANKING" sub="Cuentas y movimientos bancarios" icon="≋"
     blurb="Aquí verás tus cuentas, saldos y cada movimiento del banco, conciliados contra tus pagos y depósitos."
-    activates="Conectar tus cuentas bancarias (vía Plaid u otro agregador). Los movimientos entran solos cada mañana y se cruzan con lo que registraste — el banco es evidencia, nunca un gasto nuevo."
+    activates="Conectar tus cuentas bancarias (Plaid para EE.UU., Belvo para Latinoamérica). Los movimientos entran solos cada mañana y se cruzan con lo que registraste — el banco es evidencia, nunca un gasto nuevo."
   />
 );
 const Recon = () => (
@@ -42,7 +43,7 @@ const AIModules = () => (
   <PlaceholderScreen
     title="AI · AUTOMATIZACIÓN" sub="OCR de facturas · email · clasificación" icon="◇"
     blurb="La IA leerá facturas desde foto/PDF/email, sugerirá categorías con confianza visible y detectará duplicados — tú siempre decides."
-    activates="Requiere el backend en producción (ya está construido y probado). La IA nunca aprueba ni paga: solo propone."
+    activates="Se activa con el servicio de IA en producción. La IA nunca aprueba ni paga: solo propone."
   />
 );
 const Insights = () => (
@@ -67,8 +68,25 @@ const modules = [
 
 type ModuleKey = (typeof modules)[number]['key'];
 
-export default function App() {
+function Shell() {
+  const { ready, authed } = useStore();
   const [moduleKey, setModuleKey] = useState<ModuleKey>('dashboard');
+
+  if (!ready) return <View style={{ flex: 1, backgroundColor: colors.appBg }} />;
+  if (!authed) return <AuthScreen />;
+
+  const Screen = modules.find((m) => m.key === moduleKey)!.Screen;
+  return (
+    <View style={{ flex: 1, backgroundColor: colors.appBg }}>
+      <View style={{ flex: 1 }}>
+        <Screen key={moduleKey} />
+      </View>
+      <ModuleDock modules={modules} activeKey={moduleKey} onSelect={(k) => setModuleKey(k as ModuleKey)} />
+    </View>
+  );
+}
+
+export default function App() {
   const { width } = useWindowDimensions();
   const [fontsLoaded] = useFonts({
     IBMPlexSans_400Regular,
@@ -82,22 +100,13 @@ export default function App() {
   });
   if (!fontsLoaded) return null;
 
-  const Screen = modules.find((m) => m.key === moduleKey)!.Screen;
-
   const app = (
     <StoreProvider>
-      <View style={{ flex: 1, backgroundColor: colors.appBg }}>
-        <View style={{ flex: 1 }}>
-          <Screen key={moduleKey} />
-        </View>
-        <ModuleDock modules={modules} activeKey={moduleKey} onSelect={(k) => setModuleKey(k as ModuleKey)} />
-      </View>
+      <Shell />
     </StoreProvider>
   );
 
   if (Platform.OS === 'web') {
-    // Narrow viewports (a phone browser, a small window): the app fills the
-    // screen like a real app. Wide screens get the centered review frame.
     if (width < 560) {
       return <View style={{ flex: 1, backgroundColor: colors.appBg }}>{app}</View>;
     }

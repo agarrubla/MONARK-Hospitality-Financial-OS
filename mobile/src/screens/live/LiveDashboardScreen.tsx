@@ -12,7 +12,7 @@ import {
 import { colors, fMono, fSans } from '../../theme/tokens';
 
 export default function LiveDashboardScreen() {
-  const { data, ready, addLocation } = useStore();
+  const { data, ready, addLocation, logout, busy, lastError } = useStore();
   const [locName, setLocName] = useState('');
   const [locCode, setLocCode] = useState('');
 
@@ -29,20 +29,23 @@ export default function LiveDashboardScreen() {
           <View style={{ backgroundColor: colors.ink, borderRadius: 14, padding: 18 }}>
             <Text style={{ ...fSans(600, 9.5, 0.14), color: colors.gold, marginBottom: 8 }}>EMPEZAR</Text>
             <Text style={{ ...fSans(400, 12), lineHeight: 18, color: '#c7d4cd' }}>
-              La app arranca vacía: registra tu primer local y empieza a cargar ventas, facturas y pagos. Todo se guarda en este dispositivo. Cada número que veas saldrá de lo que tú registres.
+              La app arranca vacía: registra tu primer local y empieza a cargar ventas, facturas y pagos. Todo se guarda en tu cuenta en la nube — entra desde cualquier dispositivo y verás lo mismo. Cada número que veas saldrá de lo que tú registres.
             </Text>
           </View>
           <View style={{ ...card, padding: 16 }}>
             <SectionLabel>TU PRIMER LOCAL</SectionLabel>
             <Field label="NOMBRE" value={locName} onChange={setLocName} placeholder="p. ej. La Cabaña Centro" />
             <Field label="CÓDIGO CORTO" value={locCode} onChange={setLocCode} placeholder="p. ej. CENTRO" mono />
+            {!!lastError && (
+              <Text style={{ ...fSans(500, 11), lineHeight: 16.5, color: colors.red, marginBottom: 8 }}>{lastError}</Text>
+            )}
             <PrimaryButton
-              label="Crear local"
+              label={busy ? "Creando…" : "Crear local"}
               disabled={!locName.trim() || !locCode.trim()}
               onPress={() => {
-                addLocation(locName.trim(), locCode.trim());
-                setLocName('');
-                setLocCode('');
+                addLocation(locName.trim(), locCode.trim())
+                  .then(() => { setLocName(''); setLocCode(''); })
+                  .catch(() => {});
               }}
             />
           </View>
@@ -115,6 +118,10 @@ export default function LiveDashboardScreen() {
             {stat('Salidas de caja · mes', money(cashOut), 'pagos por fecha de pago')}
           </View>
         </View>
+
+        <Text onPress={() => void logout()} style={{ ...fSans(600, 11), color: colors.muted, textAlign: 'center', paddingVertical: 8 }}>
+          Cerrar sesión ({data.orgName})
+        </Text>
       </ScrollView>
     </View>
   );

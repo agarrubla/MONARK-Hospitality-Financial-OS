@@ -16,7 +16,7 @@ const num = (s: string): number => {
 };
 
 export default function LivePOSScreen() {
-  const { data, addPosDay } = useStore();
+  const { data, addPosDay, busy, lastError } = useStore();
   const [view, setView] = useState<'list' | 'new'>('list');
   const [locationId, setLocationId] = useState(data.locations[0]?.id ?? '');
   const [date, setDate] = useState(todayISO());
@@ -30,8 +30,8 @@ export default function LivePOSScreen() {
   const locCode = (id: string) => data.locations.find((l) => l.id === id)?.code ?? '—';
   const dup = data.posDays.some((p) => p.date === date && p.locationId === (locationId || data.locations[0]?.id));
   const canSave =
-    /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(num(gross)) && num(gross) > 0 && !dup &&
-    [discounts, tax, tips, food, bev].every((s) => s === '' || !Number.isNaN(num(s)));
+    /^\d{4}-\d{2}-\d{2}$/.test(date) && !Number.isNaN(num(gross)) && num(gross) > 0 && !dup && !busy &&
+    [discounts, tax, tips].every((s) => s === '' || !Number.isNaN(num(s)));
 
   const save = () => {
     addPosDay({
@@ -41,11 +41,12 @@ export default function LivePOSScreen() {
       discounts: discounts === '' ? 0 : num(discounts),
       tax: tax === '' ? 0 : num(tax),
       tips: tips === '' ? 0 : num(tips),
-      food: food === '' ? 0 : num(food),
-      bev: bev === '' ? 0 : num(bev),
-    });
-    setGross(''); setDiscounts(''); setTax(''); setTips(''); setFood(''); setBev('');
-    setView('list');
+    })
+      .then(() => {
+        setGross(''); setDiscounts(''); setTax(''); setTips(''); setFood(''); setBev('');
+        setView('list');
+      })
+      .catch(() => {});
   };
 
   return (
@@ -77,7 +78,6 @@ export default function LivePOSScreen() {
                   </View>
                   <Text style={{ ...fSans(400, 10.5), color: colors.muted, marginTop: 3 }}>
                     bruto {money(p.gross)} · desc. {money(p.discounts)} · imp. {money(p.tax)} · propinas {money(p.tips)}
-                    {p.food + p.bev > 0 ? ` · comida ${money(p.food)} / bebida ${money(p.bev)}` : ''}
                   </Text>
                 </View>
               ))}
@@ -121,14 +121,9 @@ export default function LivePOSScreen() {
                 <Field label="PROPINAS" value={tips} onChange={setTips} placeholder="0.00" keyboardType="decimal-pad" mono />
               </View>
             </View>
-            <View style={{ flexDirection: 'row', gap: 10 }}>
-              <View style={{ flex: 1 }}>
-                <Field label="COMIDA (OPCIONAL)" value={food} onChange={setFood} placeholder="0.00" keyboardType="decimal-pad" mono />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Field label="BEBIDA (OPCIONAL)" value={bev} onChange={setBev} placeholder="0.00" keyboardType="decimal-pad" mono />
-              </View>
-            </View>
+            {!!lastError && (
+              <Text style={{ ...fSans(500, 11), lineHeight: 16.5, color: colors.red, marginBottom: 8 }}>{lastError}</Text>
+            )}
             <PrimaryButton
               label={/^\d{4}-\d{2}-\d{2}$/.test(date) ? `Guardar · ingreso de ${monthLabel(monthOf(date))}` : 'Guardar'}
               onPress={save}

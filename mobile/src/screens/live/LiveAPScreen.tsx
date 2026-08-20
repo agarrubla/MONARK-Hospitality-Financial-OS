@@ -15,7 +15,6 @@ import { colors, fMono, fSans } from '../../theme/tokens';
 const statusMeta: Record<InvoiceStatus, [string, string, string]> = {
   pending_approval: ['POR APROBAR', '#b07c1e', '#fdf6ec'],
   approved: ['APROBADA', '#14584a', '#eaf3ee'],
-  scheduled: ['PROGRAMADA', '#14584a', '#eaf3ee'],
   paid: ['PAGADA', '#5c6b64', '#f0efe9'],
   rejected: ['RECHAZADA', '#b3402e', '#faeeeb'],
   on_hold: ['EN PAUSA', '#b3402e', '#faeeeb'],
@@ -36,7 +35,7 @@ const num = (s: string): number => {
 };
 
 export default function LiveAPScreen() {
-  const { data, addVendor, addInvoice, setInvoiceStatus } = useStore();
+  const { data, addInvoice, setInvoiceStatus, busy, lastError } = useStore();
   const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
   const [invId, setInvId] = useState<string | null>(null);
 
@@ -47,7 +46,7 @@ export default function LiveAPScreen() {
   const [invoiceDate, setInvoiceDate] = useState(todayISO());
   const [expenseDate, setExpenseDate] = useState(todayISO());
   const [dueDate, setDueDate] = useState('');
-  const [categoryId, setCategoryId] = useState('c-food');
+  const [categoryId, setCategoryId] = useState(data.categories[0]?.id ?? '');
   const [locationId, setLocationId] = useState(data.locations[0]?.id ?? '');
   const [description, setDescription] = useState('');
   const [subtotal, setSubtotal] = useState('');
@@ -64,15 +63,14 @@ export default function LiveAPScreen() {
   };
 
   const canSave =
-    (vendorId || newVendor.trim()) && number.trim() && /^\d{4}-\d{2}-\d{2}$/.test(invoiceDate) &&
+    (vendorId || newVendor.trim()) && (categoryId || data.categories.length === 0) && number.trim() && /^\d{4}-\d{2}-\d{2}$/.test(invoiceDate) &&
     /^\d{4}-\d{2}-\d{2}$/.test(expenseDate) && !Number.isNaN(num(subtotal || '0')) && num(subtotal) > 0 &&
     (tax === '' || !Number.isNaN(num(tax))) && (data.locations.length === 0 || locationId);
 
   const save = () => {
-    let vid = vendorId;
-    if (!vid && newVendor.trim()) vid = addVendor(newVendor.trim(), 30).id;
     addInvoice({
-      vendorId: vid,
+      vendorId: vendorId || undefined,
+      vendorName: vendorId ? undefined : newVendor.trim(),
       locationId: locationId || data.locations[0]?.id || '',
       number: number.trim(),
       invoiceDate,
@@ -82,9 +80,9 @@ export default function LiveAPScreen() {
       description: description.trim(),
       subtotal: num(subtotal),
       tax: tax === '' ? 0 : num(tax),
-    });
-    resetForm();
-    setView('list');
+    })
+      .then(() => { resetForm(); setView('list'); })
+      .catch(() => {});
   };
 
   return (
@@ -174,7 +172,10 @@ export default function LiveAPScreen() {
                 <Field label="IMPUESTO" value={tax} onChange={setTax} placeholder="0.00" keyboardType="decimal-pad" mono />
               </View>
             </View>
-            <PrimaryButton label="Guardar · queda Por aprobar" onPress={save} disabled={!canSave} />
+            {!!lastError && (
+              <Text style={{ ...fSans(500, 11), lineHeight: 16.5, color: colors.red, marginBottom: 8 }}>{lastError}</Text>
+            )}
+            <PrimaryButton label={busy ? 'Guardando…' : 'Guardar · queda Por aprobar'} onPress={save} disabled={!canSave || busy} />
             <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: 8 }}>
               La factura entra al P&L de {/^\d{4}-\d{2}-\d{2}$/.test(expenseDate) ? monthLabel(monthOf(expenseDate)) : 'su mes de gasto'} cuando se apruebe. El pago (cuando lo registres en Treasury) afecta solo la caja de su propio mes.
             </Text>
@@ -199,15 +200,15 @@ export default function LiveAPScreen() {
             {d.status === 'pending_approval' && (
               <View style={{ flexDirection: 'row', gap: 8, marginTop: 14 }}>
                 <View style={{ flex: 1 }}>
-                  <PrimaryButton label="Aprobar" onPress={() => setInvoiceStatus(d.id, 'approved', 'Aprobada')} />
+                  <PrimaryButton label="Aprobar" onPress={() => void setInvoiceStatus(d.id, 'approved').catch(() => {})} />
                 </View>
-                <GhostButton label="Rechazar" danger onPress={() => setInvoiceStatus(d.id, 'rejected', 'Rechazada')} />
-                <GhostButton label="Pausar" onPress={() => setInvoiceStatus(d.id, 'on_hold', 'En pausa')} />
+                <GhostButton label="Rechazar" danger onPress={() => void setInvoiceStatus(d.id, 'rejected').catch(() => {})} />
+                <GhostButton label="Pausar" onPress={() => void setInvoiceStatus(d.id, 'on_hold').catch(() => {})} />
               </View>
             )}
             {d.status === 'on_hold' && (
               <View style={{ marginTop: 12 }}>
-                <PrimaryButton label="Reactivar (Por aprobar)" onPress={() => setInvoiceStatus(d.id, 'pending_approval', 'Reactivada')} />
+                <PrimaryButton label="Reactivar (Por aprobar)" onPress={() => void setInvoiceStatus(d.id, 'pending_approval').catch(() => {})} />
               </View>
             )}
           </View>
@@ -225,10 +226,10 @@ export default function LiveAPScreen() {
               <View style={{ flex: 1, backgroundColor: colors.inkSecondary, borderRadius: 9, paddingVertical: 10, paddingHorizontal: 12 }}>
                 <Text style={{ ...fSans(600, 9, 0.08), color: colors.headerMuted }}>MES DE PAGO · CAJA</Text>
                 <Text style={{ ...fMono(600, 15), color: colors.appBg, marginTop: 4 }}>
-                  {d.status === 'paid' ? '✓ pagada' : '—'}
+                  {d.paymentDate ? monthLabel(monthOf(d.paymentDate)) : '—'}
                 </Text>
                 <Text style={{ ...fSans(400, 9.5), color: colors.scoreSub, marginTop: 2 }}>
-                  {d.status === 'paid' ? 'ver Treasury · Historial' : 'sin pago aún — no hay evento de caja'}
+                  {d.paymentDate ? 'fecha de pago ' + d.paymentDate : 'sin pago aún — no hay evento de caja'}
                 </Text>
               </View>
             </View>

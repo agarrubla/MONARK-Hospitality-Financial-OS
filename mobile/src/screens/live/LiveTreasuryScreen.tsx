@@ -8,20 +8,18 @@ import { Pressable, ScrollView, Text, View } from 'react-native';
 import {
   card, ChoiceChips, EmptyState, Field, Header, PrimaryButton, SectionLabel,
 } from '../../components/ui';
-import {
-  invoiceTotal, money, monthLabel, monthOf, todayISO, useStore, type Payment,
-} from '../../store/store';
+import { invoiceTotal, money, monthLabel, monthOf, todayISO, useStore } from '../../store/store';
 import { colors, fMono, fSans } from '../../theme/tokens';
 
 export default function LiveTreasuryScreen() {
-  const { data, setInvoiceStatus, recordPayment } = useStore();
+  const { data, recordPayment, busy, lastError } = useStore();
   const [view, setView] = useState<'ready' | 'pay' | 'history'>('ready');
   const [payingId, setPayingId] = useState<string | null>(null);
   const [payDate, setPayDate] = useState(todayISO());
-  const [method, setMethod] = useState<Payment['method']>('ach');
+  const [method, setMethod] = useState<'ach' | 'check' | 'card' | 'cash'>('ach');
   const [ref, setRef] = useState('');
 
-  const ready = data.invoices.filter((i) => i.status === 'approved' || i.status === 'scheduled');
+  const ready = data.invoices.filter((i) => i.status === 'approved');
   const paying = data.invoices.find((i) => i.id === payingId);
   const vendorName = (id: string) => data.vendors.find((v) => v.id === id)?.name ?? '—';
 
@@ -88,12 +86,16 @@ export default function LiveTreasuryScreen() {
               onChange={setMethod}
             />
             <Field label="REFERENCIA (OPCIONAL)" value={ref} onChange={setRef} placeholder="p. ej. transf. #4421" mono />
+            {!!lastError && (
+              <Text style={{ ...fSans(500, 11), lineHeight: 16.5, color: colors.red, marginBottom: 8 }}>{lastError}</Text>
+            )}
             <PrimaryButton
               label={/^\d{4}-\d{2}-\d{2}$/.test(payDate) ? `Pagar · caja de ${monthLabel(monthOf(payDate))}` : 'Pagar'}
               disabled={!/^\d{4}-\d{2}-\d{2}$/.test(payDate)}
               onPress={() => {
-                recordPayment(paying.id, payDate, method, ref.trim() || undefined);
-                setView('history');
+                recordPayment(paying.id, payDate, method, ref.trim() || undefined)
+                  .then(() => setView('history'))
+                  .catch(() => {});
               }}
             />
             <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: 8 }}>
