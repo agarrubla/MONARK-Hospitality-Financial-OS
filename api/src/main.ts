@@ -18,6 +18,13 @@ async function main() {
     return { ok: true, service: 'monark-api' };
   });
 
+  // Human-friendly root: this host is an API, not a website.
+  app.get('/', async () => ({
+    service: 'MONARK Hospitality Financial OS · API',
+    status: 'ok',
+    note: 'Este servidor es para la app de MONARK, no para navegar. Estado en /health. Todos los datos requieren autenticación.',
+  }));
+
   const port = Number(process.env.PORT ?? 3000);
   await app.listen({ port, host: '0.0.0.0' });
   console.log(`monark-api listening on :${port}`);
