@@ -50,6 +50,7 @@ export interface PosDay {
   discounts: number;
   tax: number;
   tips: number;
+  source?: string; // 'manual' | 'clover' | 'toast' | 'square' | 'lightspeed'
 }
 
 interface AppData {

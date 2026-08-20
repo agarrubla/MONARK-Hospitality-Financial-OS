@@ -74,6 +74,11 @@ export default function LivePOSScreen() {
                     <Text style={{ ...fSans(600, 12.5), color: colors.text, flex: 1 }}>
                       {locCode(p.locationId)} · {p.date}
                     </Text>
+                    {!!p.source && p.source !== 'manual' && (
+                      <View style={{ backgroundColor: '#eaf3ee', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                        <Text style={{ ...fSans(600, 8.5, 0.08), color: colors.green }}>{p.source.toUpperCase()}</Text>
+                      </View>
+                    )}
                     <Text style={{ ...fMono(600, 14), color: colors.text }}>{money(p.gross - p.discounts)}</Text>
                   </View>
                   <Text style={{ ...fSans(400, 10.5), color: colors.muted, marginTop: 3 }}>

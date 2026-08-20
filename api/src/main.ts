@@ -5,6 +5,7 @@
 import pg from 'pg';
 import { pgConfig, runMigrations } from '../../scripts/migrate.js';
 import { buildProductApp } from './app.js';
+import { startScheduler } from './scheduler.js';
 
 async function main() {
   await runMigrations();
@@ -28,6 +29,8 @@ async function main() {
   const port = Number(process.env.PORT ?? 3000);
   await app.listen({ port, host: '0.0.0.0' });
   console.log(`monark-api listening on :${port}`);
+
+  startScheduler(pool);
 }
 
 main().catch((err) => {

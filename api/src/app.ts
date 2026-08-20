@@ -231,8 +231,9 @@ export function buildProductApp(pool: pg.Pool): FastifyInstance {
       ).rows.map((r) => ({ ...r, status: toAppStatus(r.status) }));
       const posDays = (
         await c.query(
-          `SELECT id, location_id AS "locationId", business_date::text AS date, gross_sales::float8 AS gross,
-                  discounts::float8 AS discounts, tax_collected::float8 AS tax, tips::float8 AS tips
+          `SELECT id, location_id AS "locationId", business_date::text AS date, source::text AS source,
+                  gross_sales::float8 AS gross, discounts::float8 AS discounts,
+                  tax_collected::float8 AS tax, tips::float8 AS tips
              FROM pos_sales ORDER BY business_date DESC`,
         )
       ).rows;
