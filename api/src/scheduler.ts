@@ -61,7 +61,7 @@ async function attachConfigured(pool: pg.Pool): Promise<void> {
     const ins = await pool.query(
       `INSERT INTO integrations (organization_id, provider, external_ref, location_id,
                                  credentials_ref, scopes, status)
-       VALUES ($1, $2::integration_provider, $3, $4, $5, $6::jsonb, 'pending')
+       VALUES ($1, $2::integration_provider, $3, $4, $5, $6::jsonb, 'connected')
        ON CONFLICT (organization_id, provider, external_ref) DO NOTHING
        RETURNING id`,
       [org.id, e.provider, e.merchantId, loc.id, e.credentialsRef, JSON.stringify(['payments.read'])],
@@ -74,7 +74,7 @@ async function syncPosAll(pool: pg.Pool): Promise<void> {
   const rows = (
     await pool.query(
       `SELECT id, provider, location_id, credentials_ref FROM integrations
-        WHERE provider::text = ANY($1) AND status IN ('pending', 'connected') AND location_id IS NOT NULL`,
+        WHERE provider::text = ANY($1) AND status IN ('connected', 'error') AND location_id IS NOT NULL`,
       [[...POS_PROVIDERS]],
     )
   ).rows;
