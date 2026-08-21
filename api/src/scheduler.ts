@@ -97,6 +97,8 @@ export async function syncPosWindow(pool: pg.Pool, integrationId: string): Promi
     try {
       const res = await syncPosIntegration(pool, row.id, day);
       if (res.imported) imported++;
+      // Be gentle with provider rate limits during backfills.
+      await new Promise((r) => setTimeout(r, 500));
     } catch (err) {
       console.error(`sync ${row.provider} ${row.id} ${day}: ${(err as Error).message}`);
       break; // credentials/network problem — no point hammering the rest of the window

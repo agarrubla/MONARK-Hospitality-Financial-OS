@@ -13,6 +13,19 @@ const need = (creds: Record<string, string>, keys: string[], provider: string): 
   }
 };
 
+const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
+
+/** Providers rate-limit backfills; wait out 429/5xx instead of failing the day. */
+async function fetchWithRetry(url: string, init: RequestInit, tries = 5): Promise<Response> {
+  let res: Response | null = null;
+  for (let attempt = 0; attempt < tries; attempt++) {
+    res = await fetch(url, init);
+    if (res.status !== 429 && res.status < 500) return res;
+    await sleep(1500 * (attempt + 1));
+  }
+  return res!;
+}
+
 /* ── Clover ──────────────────────────────────────────────────────────────── */
 
 interface CloverPayment {
@@ -41,7 +54,7 @@ export const cloverAdapter: PosAdapter = {
         `${base}/v3/merchants/${merchantId}/payments` +
         `?filter=createdTime>=${dayStart}&filter=createdTime<${dayEnd}` +
         `&expand=tender&limit=1000&offset=${offset}`;
-      const res = await fetch(url, { headers: { authorization: `Bearer ${creds.api_token}` } });
+      const res = await fetchWithRetry(url, { headers: { authorization: `Bearer ${creds.api_token}` } });
       if (!res.ok) throw new Error(`clover payments ${res.status}: ${await res.text()}`);
       const json = (await res.json()) as { elements: CloverPayment[] };
       payments.push(...json.elements);
