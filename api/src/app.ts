@@ -19,6 +19,7 @@ import type pg from 'pg';
 import { resolveCredentials } from './integrations/sync.js';
 import { saveSecret } from './secrets.js';
 import { extractInvoice } from './ai/invoiceExtract.js';
+import { sendEmail } from './email/resend.js';
 
 /* ── Passwords (scrypt, per-user salt) ───────────────────────────────────── */
 
@@ -273,6 +274,7 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
           `SELECT i.id, i.vendor_id AS "vendorId", i.location_id AS "locationId", i.invoice_number AS number,
                   i.invoice_date::text AS "invoiceDate", i.expense_date::text AS "expenseDate", i.due_date::text AS "dueDate",
                   i.subtotal::float8 AS subtotal, i.tax::float8 AS tax, i.status, i.created_at::text AS "createdAt",
+                  i.source::text AS source, i.source_email AS "sourceEmail",
                   li.expense_category_id AS "categoryId", li.description,
                   p.payment_date::text AS "paymentDate", p.method AS "paymentMethod", p.external_ref AS "paymentRef"
              FROM invoices i
@@ -384,6 +386,119 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
         matchCandidates,
       };
     });
+  });
+
+  /* ── Ingesta por correo (Resend inbound webhook) ───────────────────────── */
+  // Secret-gated public route. Each attachment is read by the AI and lands as
+  // a pending_approval invoice tagged 'email_capture' with the sender saved —
+  // the human still approves; on approval the sender gets notified.
+
+  app.post('/email/inbound', async (req, reply) => {
+    const secret = (req.query as { secret?: string }).secret;
+    if (!process.env.EMAIL_INBOUND_SECRET || secret !== process.env.EMAIL_INBOUND_SECRET) {
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    const evt = req.body as {
+      type?: string;
+      data?: {
+        from?: string | { email?: string; name?: string };
+        subject?: string;
+        attachments?: Array<{ content?: string; filename?: string; content_type?: string }>;
+      };
+    };
+    const data = evt.data ?? (evt as never);
+    const fromRaw = (data as { from?: string | { email?: string } }).from;
+    const fromEmail = typeof fromRaw === 'string'
+      ? (fromRaw.match(/[\w.+-]+@[\w.-]+/)?.[0] ?? null)
+      : fromRaw?.email ?? null;
+    const attachments = (data as { attachments?: Array<{ content?: string; filename?: string; content_type?: string }> }).attachments ?? [];
+
+    // Which organization receives emailed invoices (v1: single configured org,
+    // resolved by its POS merchant so no raw ids live in env config).
+    const orgRow = (
+      await pool.query(
+        `SELECT organization_id AS id FROM integrations
+          WHERE provider = 'clover' AND external_ref = $1 ORDER BY created_at LIMIT 1`,
+        [process.env.INBOUND_ORG_MERCHANT ?? ''],
+      )
+    ).rows[0];
+    if (!orgRow) return { ok: true, created: 0, note: 'no org configured' };
+    const orgId = orgRow.id as string;
+    const owner = (
+      await pool.query(
+        `SELECT uor.user_id AS id FROM user_org_roles uor
+          JOIN organizations o ON o.id = uor.organization_id
+         WHERE uor.organization_id = $1
+           AND uor.user_id::text IS DISTINCT FROM (o.settings ->> 'system_approver_id')
+         ORDER BY uor.created_at LIMIT 1`,
+        [orgId],
+      )
+    ).rows[0];
+    if (!owner) return { ok: true, created: 0, note: 'no owner' };
+    const ctx = { orgId, userId: owner.id as string };
+
+    const categories = await asUser(ctx, async (c) =>
+      (await c.query(`SELECT id, name FROM expense_categories WHERE is_active`)).rows as Array<{ id: string; name: string }>);
+    const location = await asUser(ctx, async (c) =>
+      (await c.query(`SELECT id FROM locations ORDER BY created_at LIMIT 1`)).rows[0]);
+    if (!location) return { ok: true, created: 0, note: 'no location' };
+
+    let created = 0;
+    const skipped: string[] = [];
+    for (const att of attachments.slice(0, 5)) {
+      const mime = att.content_type ?? '';
+      if (!att.content || !(mime === 'application/pdf' || mime.startsWith('image/'))) continue;
+      if (att.content.length > 12 * 1024 * 1024) { skipped.push(`${att.filename}: muy grande`); continue; }
+      try {
+        const p = await extractInvoice(att.content, mime, categories.map((c) => c.name));
+        if (!p.legible || p.subtotal == null || p.subtotal <= 0 || !p.vendor_name) {
+          skipped.push(`${att.filename}: ilegible o incompleta`);
+          continue;
+        }
+        const subtotal = p.subtotal;
+        const number = p.invoice_number ?? `EMAIL-${new Date().toISOString().slice(0, 10)}-${randomBytes(2).toString('hex').toUpperCase()}`;
+        const cat = categories.find((c) => c.name === p.category_name) ?? categories.find((c) => c.name === 'Other') ?? categories[0];
+        await asUser(ctx, async (c) => {
+          let vendorId = (
+            await c.query(`SELECT id FROM vendors WHERE lower(name) = lower($1) LIMIT 1`, [p.vendor_name])
+          ).rows[0]?.id as string | undefined;
+          if (!vendorId) {
+            vendorId = (
+              await c.query(
+                `INSERT INTO vendors (organization_id, name, normalized_name, payment_terms_days, status)
+                 VALUES ($1, $2, '', 30, 'active') RETURNING id`,
+                [ctx.orgId, p.vendor_name],
+              )
+            ).rows[0].id;
+          }
+          const invoiceDate = p.invoice_date ?? new Date().toISOString().slice(0, 10);
+          const inv = await c.query(
+            `INSERT INTO invoices (organization_id, location_id, vendor_id, invoice_number, invoice_date,
+                                   expense_date, due_date, currency, subtotal, tax, total, status, source,
+                                   source_email, created_by)
+             VALUES ($1, $2, $3, $4, $5, $5, $6, 'USD', $7, $8, $9, 'draft', 'email_capture', $10, $11)
+             RETURNING id`,
+            [ctx.orgId, location.id, vendorId, number, invoiceDate, p.due_date ?? invoiceDate,
+             subtotal, p.tax ?? 0, subtotal + (p.tax ?? 0), fromEmail, ctx.userId],
+          );
+          await c.query(
+            `INSERT INTO invoice_line_items (invoice_id, line_no, description, amount, expense_category_id)
+             VALUES ($1, 1, $2, $3, $4)`,
+            [inv.rows[0].id,
+             `${p.description ?? 'Factura recibida por correo'} · IA confianza ${Math.round(p.confidence * 100)}%${p.notes ? ` · ${p.notes}` : ''}`,
+             subtotal, cat?.id],
+          );
+          await c.query(`UPDATE invoices SET status = 'pending_approval' WHERE id = $1`, [inv.rows[0].id]);
+        });
+        created++;
+      } catch (err) {
+        const msg = String((err as Error).message ?? err);
+        skipped.push(`${att.filename}: ${msg.includes('duplicate key') ? 'ya existía' : 'error de lectura'}`);
+        console.error(`email inbound ${att.filename}:`, msg);
+      }
+    }
+    console.log(`email inbound de ${fromEmail ?? '?'}: ${created} creadas${skipped.length ? `, saltadas: ${skipped.join('; ')}` : ''}`);
+    return { ok: true, created, skipped };
   });
 
   /* ── IA: leer factura desde foto/PDF (solo propone) ────────────────────── */
@@ -527,10 +642,33 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
     const { action } = req.body as { action: 'approve' | 'reject' | 'hold' | 'reactivate' };
     const target = { approve: 'approved', reject: 'void', hold: 'draft', reactivate: 'pending_approval' }[action];
     if (!target) return reply.code(400).send({ error: 'Acción inválida.' });
-    return asUser(ctx, async (c) => {
+    const out = await asUser(ctx, async (c) => {
       await c.query(`UPDATE invoices SET status = $2 WHERE id = $1`, [id, target]);
       return { ok: true };
     });
+    // Emailed-in invoice approved → tell the sender (best-effort, never blocks).
+    if (action === 'approve') {
+      const inv = (
+        await pool.query(
+          `SELECT i.invoice_number AS number, i.total::float8 AS total, i.source_email AS email,
+                  v.name AS vendor, o.name AS org
+             FROM invoices i JOIN vendors v ON v.id = i.vendor_id
+             JOIN organizations o ON o.id = i.organization_id
+            WHERE i.id = $1 AND i.organization_id = $2 AND i.source_email IS NOT NULL`,
+          [id, ctx.orgId],
+        )
+      ).rows[0];
+      if (inv) {
+        void sendEmail(
+          inv.email,
+          `Factura ${inv.number} aprobada — ${inv.org}`,
+          `<p>Estimado proveedor (${inv.vendor}):</p>
+           <p>Su factura <strong>${inv.number}</strong> por <strong>$${Number(inv.total).toFixed(2)}</strong> fue <strong>aprobada</strong> por ${inv.org} y entró a proceso de pago.</p>
+           <p>Este es un mensaje automático del sistema financiero MONARK — no es necesario responder.</p>`,
+        );
+      }
+    }
+    return out;
   });
 
   app.post('/invoices/:id/pay', async (req, reply) => {

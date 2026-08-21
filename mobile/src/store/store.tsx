@@ -27,6 +27,8 @@ export interface Invoice {
   tax: number;
   status: InvoiceStatus;
   createdAt: string;
+  source?: string; // 'manual' | 'email_capture' | ...
+  sourceEmail?: string | null;
   paymentDate?: string | null;
   paymentMethod?: string | null;
   paymentRef?: string | null;

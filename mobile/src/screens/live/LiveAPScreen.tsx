@@ -154,7 +154,7 @@ export default function LiveAPScreen() {
                   <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 5 }}>
                     <Badge status={i.status} />
                     <Text style={{ ...fSans(400, 10.5), color: colors.muted, flex: 1 }} numberOfLines={1}>
-                      {i.number} · {locCode(i.locationId)} · gasto {monthLabel(monthOf(i.expenseDate))}
+                      {i.source === 'email_capture' ? '✉ correo · ' : ''}{i.number} · {locCode(i.locationId)} · gasto {monthLabel(monthOf(i.expenseDate))}
                     </Text>
                   </View>
                 </Pressable>
