@@ -5,7 +5,7 @@
  * sees them again.
  */
 import React, { useState } from 'react';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
 import {
   card, ChoiceChips, EmptyState, Field, Header, PrimaryButton, SectionLabel,
 } from '../../components/ui';
@@ -143,6 +143,12 @@ export default function LiveSettingsScreen() {
             <View style={{ ...card, padding: 14 }}>
               <Text style={{ ...fSans(400, 11.5), lineHeight: 17, color: colors.textSecondary2 }}>
                 Este módulo financiero forma parte de la super app MONARK. La identidad vendrá del login central de la super app; por ahora la sesión pertenece a este dispositivo.
+              </Text>
+              <Text
+                onPress={() => { void Linking.openURL('https://wonderful-muffin-aedd73.netlify.app/privacy.html'); }}
+                style={{ ...fSans(600, 11.5), color: colors.green, marginTop: 10 }}
+              >
+                Política de privacidad →
               </Text>
             </View>
           </View>

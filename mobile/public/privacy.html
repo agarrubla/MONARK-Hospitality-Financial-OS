@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy · MONARK</title>
+<style>
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a1a1a; background: #f4f2ec; margin: 0; }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 40px 24px 60px; }
+  h1 { font-size: 26px; border-bottom: 3px solid #0f2019; padding-bottom: 10px; }
+  h2 { font-size: 15px; color: #14584a; margin-top: 26px; text-transform: uppercase; letter-spacing: 0.5px; }
+  p, li { font-size: 14px; line-height: 1.65; }
+  .meta { color: #555; font-size: 12.5px; }
+  a { color: #14584a; }
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>Privacy Policy</h1>
+<p class="meta"><strong>MONARK Hospitality Financial OS</strong> — operated by Rosario Wynwood Corp, d/b/a Casa D Miami<br>
+Effective date: August 20, 2026 · Contact: agarrubla@evedesa.com</p>
+
+<h2>1. What MONARK is</h2>
+<p>MONARK is an internal financial management application used by Rosario Wynwood Corp (d/b/a Casa D Miami) to manage its own restaurant operations: sales, supplier invoices, payments, and bank reconciliation. It is not offered to the general public; its users are the business owner and authorized personnel of the company.</p>
+
+<h2>2. Data we collect</h2>
+<ul>
+  <li><strong>Financial account data via Plaid.</strong> When a user connects a bank account through Plaid Link, we receive account information (institution, account name, mask, type, balance) and transaction history (dates, amounts, descriptions, merchant names) from the Plaid API. We do not receive or store online banking credentials — authentication happens directly between the user and their financial institution through Plaid.</li>
+  <li><strong>Point-of-sale data.</strong> Daily sales summaries retrieved from the company's POS provider (e.g., Clover) using read-only API tokens.</li>
+  <li><strong>Business records.</strong> Supplier invoices, payments, and related accounting records entered by users.</li>
+  <li><strong>Account data.</strong> Email address and hashed authentication credentials for application access.</li>
+</ul>
+
+<h2>3. How we use data</h2>
+<p>Data is used exclusively for the company's own bookkeeping and financial management: revenue and expense reporting, accounts payable, treasury, and reconciliation of payments and deposits against bank activity. We do <strong>not</strong> sell, rent, license, or share consumer data with third parties, and we do not use it for advertising, credit decisioning, or any purpose beyond the company's own financial management.</p>
+
+<h2>4. Consent</h2>
+<p>Bank data is collected only after the user explicitly initiates a connection and completes Plaid's consent flow (Plaid Link), which discloses what data will be shared. POS data is collected only after the user explicitly configures the integration with their own credentials. Users may revoke consent at any time as described in Section 7.</p>
+
+<h2>5. How data is protected</h2>
+<ul>
+  <li>All data is encrypted in transit (TLS 1.2+) and at rest.</li>
+  <li>Third-party access tokens are additionally encrypted at the application layer with AES-256-GCM; the application's database role cannot read the credential store.</li>
+  <li>Access is deny-by-default with role-based access control and database-enforced tenant isolation; privileged actions are recorded in an append-only, hash-chained audit log.</li>
+  <li>Bank and POS access is read-only by design: the system cannot initiate payments or move funds.</li>
+</ul>
+
+<h2>6. Data retention</h2>
+<p>Financial records (transactions, invoices, payments, sales) are retained for as long as required for the company's accounting and by applicable tax and record-keeping laws (generally up to seven years), after which they may be deleted. Integration access tokens are retained only while the integration is active. This retention policy is reviewed at least annually.</p>
+
+<h2>7. Data deletion and revoking access</h2>
+<p>Users may disconnect a bank or POS integration at any time from the application's settings; disconnection immediately deletes the stored access token and stops all further data collection. Users may also revoke Plaid's connection to their financial institution at any time via <a href="https://my.plaid.com">my.plaid.com</a>. To request deletion of stored records (subject to legal retention obligations), contact agarrubla@evedesa.com; requests are honored within 30 days.</p>
+
+<h2>8. Third-party services</h2>
+<p>MONARK relies on the following processors, each limited to the minimum necessary function: Plaid Inc. (bank data aggregation — see the <a href="https://plaid.com/legal/#end-user-privacy-policy">Plaid End User Privacy Policy</a>), Clover (POS data), Railway (application and database hosting), and Netlify (web application delivery).</p>
+
+<h2>9. Changes to this policy</h2>
+<p>Material changes to this policy will be posted on this page with an updated effective date. This policy is reviewed at least annually.</p>
+
+<h2>10. Contact</h2>
+<p>Questions or requests regarding this policy or your data: <strong>agarrubla@evedesa.com</strong> — Rosario Wynwood Corp, d/b/a Casa D Miami, 31 NW 36th Ct, Miami, FL.</p>
+</div>
+</body>
+</html>
