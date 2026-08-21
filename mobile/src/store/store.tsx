@@ -120,6 +120,16 @@ export interface Deposit {
   suggestion: { bankTransactionId: string; postedAt: string; amount: number } | null;
 }
 
+export interface DepositSuggestion {
+  bankTransactionId: string;
+  postedAt: string;
+  amount: number;
+  depositIds: string[];
+  type: string;
+  coversFrom: string;
+  coversTo: string;
+}
+
 export interface MatchCandidate {
   paymentId: string;
   bankTransactionId: string;
@@ -168,11 +178,12 @@ interface AppData {
   bankTxns: BankTxn[];
   bankIntegrations: BankIntegration[];
   deposits: Deposit[];
+  depositSuggestions: DepositSuggestion[];
   matchCandidates: MatchCandidate[];
   insights: Insight[];
 }
 
-const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [], deposits: [], matchCandidates: [], insights: [] };
+const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [], deposits: [], depositSuggestions: [], matchCandidates: [], insights: [] };
 
 export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
 export const todayISO = (): string => new Date().toISOString().slice(0, 10);
@@ -215,6 +226,7 @@ interface StoreApi {
   bankExchange(publicToken: string): Promise<void>;
   extractInvoice(fileBase64: string, mimeType: string): Promise<InvoiceProposal>;
   confirmDeposit(depositId: string, bankTransactionId: string): Promise<void>;
+  confirmDepositGroup(depositIds: string[], bankTransactionId: string): Promise<void>;
   confirmPaymentMatch(paymentId: string, bankTransactionId: string): Promise<void>;
   askAI(question: string, history: Array<{ q: string; a: string }>): Promise<string>;
   setInsightStatus(id: string, status: 'acknowledged' | 'actioned' | 'dismissed'): Promise<void>;
@@ -401,6 +413,11 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       confirmDeposit: (depositId, bankTransactionId) =>
         run(async () => {
           await api('POST', '/reconcile/deposit', { depositId, bankTransactionId });
+          await refresh();
+        }),
+      confirmDepositGroup: (depositIds, bankTransactionId) =>
+        run(async () => {
+          await api('POST', '/reconcile/deposit-group', { depositIds, bankTransactionId });
           await refresh();
         }),
       confirmPaymentMatch: (paymentId, bankTransactionId) =>

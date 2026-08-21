@@ -137,13 +137,34 @@ async function syncPosAll(pool: pg.Pool): Promise<void> {
 
 async function runDetectors(pool: pg.Pool): Promise<void> {
   const orgs = (
-    await pool.query(`SELECT DISTINCT organization_id AS id FROM invoices`)
+    await pool.query(`SELECT DISTINCT organization_id AS id FROM invoices
+                      UNION SELECT DISTINCT organization_id FROM bank_accounts`)
   ).rows;
   for (const o of orgs) {
     try {
       const dup = (await pool.query(`SELECT detect_near_duplicate_invoices($1) AS n`, [o.id])).rows[0];
       const cross = (await pool.query(`SELECT detect_cross_account_duplicates($1) AS n`, [o.id])).rows[0];
-      const n = Number(dup.n) + Number(cross.n);
+      // Processor fee debits (monthly "discount" from the card acquirer) are a
+      // real expense nobody types in — surface them so they get booked.
+      const fees = await pool.query(
+        `INSERT INTO ai_insights (organization_id, kind, subject_type, subject_id, title, body,
+                                  confidence, severity, evidence, model_version)
+         SELECT ba.organization_id, 'recommendation', 'bank_transactions', bt.id,
+                'Comisión del procesador de tarjetas',
+                format('Débito de $%s el %s (“%s”). Parece la comisión mensual del procesador — regístrala como gasto en Fees & processing para que el P&L quede completo.',
+                       abs(bt.amount), bt.posted_at, left(bt.description_raw, 60)),
+                0.85, 'info',
+                jsonb_build_object('bank_transaction_id', bt.id, 'amount', bt.amount, 'posted_at', bt.posted_at),
+                'detector-v1'
+           FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+          WHERE ba.organization_id = $1 AND bt.amount < 0 AND bt.match_status = 'unmatched'
+            AND bt.description_raw ~* '(priority|merch(ant)? (serv|svcs|bnkcd)|bankcard|bkcd|mtot disc|card proc|pmt sys)'
+            AND NOT EXISTS (SELECT 1 FROM ai_insights i
+                             WHERE i.kind = 'recommendation' AND i.subject_id = bt.id)
+         RETURNING id`,
+        [o.id],
+      );
+      const n = Number(dup.n) + Number(cross.n) + (fees.rowCount ?? 0);
       if (n) console.log(`detectors org ${o.id}: ${n} new insight(s)`);
     } catch (err) {
       console.error(`detectors ${o.id}: ${(err as Error).message}`);

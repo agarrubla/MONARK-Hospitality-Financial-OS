@@ -18,7 +18,7 @@ const STATUS: Record<string, [string, string, string]> = {
 };
 
 export default function LiveReconScreen() {
-  const { data, confirmDeposit, confirmPaymentMatch, busy, lastError } = useStore();
+  const { data, confirmDepositGroup, confirmPaymentMatch, busy, lastError } = useStore();
   const [view, setView] = useState<'deposits' | 'payments'>('deposits');
   const hasBank = data.bankAccounts.length > 0;
 
@@ -53,6 +53,29 @@ export default function LiveReconScreen() {
           <Text style={{ ...fSans(500, 11), lineHeight: 16.5, color: colors.red }}>{lastError}</Text>
         )}
 
+        {view === 'deposits' && data.depositSuggestions.length > 0 && (
+          <>
+            <SectionLabel>CRUCES SUGERIDOS · CONFIRMA TÚ</SectionLabel>
+            {data.depositSuggestions.map((sg) => (
+              <View key={sg.bankTransactionId} style={{ ...card, paddingVertical: 12, paddingHorizontal: 14, borderColor: '#bcd3c9', borderWidth: 1.5 }}>
+                <Text style={{ ...fSans(600, 12.5), color: colors.text }}>
+                  Abono {money(sg.amount)} · llegó {sg.postedAt}
+                </Text>
+                <Text style={{ ...fSans(400, 10.5), color: colors.muted, marginTop: 3 }}>
+                  cubre {sg.depositIds.length === 1 ? `las ${sg.type === 'card_batch' ? 'tarjetas' : 'efectivo'} de ${sg.coversFrom}` : `${sg.depositIds.length} días de ${sg.type === 'card_batch' ? 'tarjetas' : 'efectivo'} (${sg.coversFrom} → ${sg.coversTo})`} · suma exacta al centavo
+                </Text>
+                <View style={{ marginTop: 10 }}>
+                  <PrimaryButton
+                    label="Confirmar cruce"
+                    disabled={busy}
+                    onPress={() => { void confirmDepositGroup(sg.depositIds, sg.bankTransactionId).catch(() => {}); }}
+                  />
+                </View>
+              </View>
+            ))}
+          </>
+        )}
+
         {view === 'deposits' && (
           data.deposits.length === 0 ? (
             <EmptyState
@@ -78,15 +101,7 @@ export default function LiveReconScreen() {
                     {d.actualAmount != null ? ` · llegó ${money(d.actualAmount)}` : ''}
                     {d.variance != null && d.variance !== 0 ? ` · diferencia ${money(d.variance)}` : ''}
                   </Text>
-                  {d.status === 'expected' && d.suggestion && (
-                    <View style={{ marginTop: 10 }}>
-                      <PrimaryButton
-                        label={`Confirmar abono ${money(d.suggestion.amount)} del ${d.suggestion.postedAt}`}
-                        disabled={busy}
-                        onPress={() => { void confirmDeposit(d.id, d.suggestion!.bankTransactionId).catch(() => {}); }}
-                      />
-                    </View>
-                  )}
+
                 </View>
               );
             })
