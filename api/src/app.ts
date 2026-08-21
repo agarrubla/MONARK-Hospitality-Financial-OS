@@ -20,6 +20,7 @@ import { resolveCredentials } from './integrations/sync.js';
 import { saveSecret } from './secrets.js';
 import { extractInvoice } from './ai/invoiceExtract.js';
 import { sendEmail } from './email/resend.js';
+import { askFinancialAssistant } from './ai/financialAssistant.js';
 
 /* ── Passwords (scrypt, per-user salt) ───────────────────────────────────── */
 
@@ -322,6 +323,16 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
             ORDER BY bt.posted_at DESC, bt.id DESC LIMIT 200`,
         )
       ).rows;
+      const insights = (
+        await c.query(
+          `SELECT id, kind::text AS kind, title, body, severity::text AS severity,
+                  confidence::float8 AS confidence, status::text AS status,
+                  subject_type AS "subjectType", subject_id AS "subjectId",
+                  created_at::text AS "createdAt"
+             FROM ai_insights WHERE status IN ('new', 'acknowledged')
+            ORDER BY created_at DESC LIMIT 60`,
+        )
+      ).rows;
       const bankIntegrations = (
         await c.query(
           `SELECT id, provider::text AS provider, status::text AS status, last_sync_at::text AS "lastSyncAt"
@@ -330,7 +341,7 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
       ).rows;
       return {
         orgName: org?.name ?? '', locations, vendors, categories, invoices, posDays, payments,
-        bankAccounts, bankTxns, bankIntegrations,
+        bankAccounts, bankTxns, bankIntegrations, insights,
       };
     }).then(async (state) => {
       // Reconciliation data (service context with explicit org filters — the
@@ -521,6 +532,38 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
       if (msg.includes('vault')) return reply.code(400).send({ error: 'La IA aún no está configurada en el servidor.' });
       return reply.code(502).send({ error: `No se pudo leer la factura: ${msg}` });
     }
+  });
+
+  /* ── IA: asistente financiero (solo lee, nunca actúa) ──────────────────── */
+
+  app.post('/ai/ask', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const b = req.body as { question?: string; history?: Array<{ q: string; a: string }> };
+    if (!b.question?.trim()) return reply.code(400).send({ error: 'Escribe una pregunta.' });
+    try {
+      const answer = await askFinancialAssistant(pool, ctx.orgId, b.question.trim().slice(0, 2000), b.history ?? []);
+      return { answer };
+    } catch (err) {
+      const msg = String((err as Error).message ?? err);
+      if (msg.includes('vault')) return reply.code(400).send({ error: 'La IA aún no está configurada en el servidor.' });
+      return reply.code(502).send({ error: 'La IA no pudo responder — intenta de nuevo.' });
+    }
+  });
+
+  app.post('/insights/:id/status', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const { id } = req.params as { id: string };
+    const { status } = req.body as { status?: string };
+    if (!status || !['acknowledged', 'actioned', 'dismissed'].includes(status)) {
+      return reply.code(400).send({ error: 'Estado inválido.' });
+    }
+    return asUser(ctx, async (c) => {
+      await c.query(`UPDATE ai_insights SET status = $2, resolved_by = $3 WHERE id = $1`,
+        [id, status, status === 'acknowledged' ? null : ctx.userId]);
+      return { ok: true };
+    });
   });
 
   /* ── Conciliación ──────────────────────────────────────────────────────── */

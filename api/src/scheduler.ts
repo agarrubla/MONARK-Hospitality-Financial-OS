@@ -135,6 +135,22 @@ async function syncPosAll(pool: pg.Pool): Promise<void> {
   }
 }
 
+async function runDetectors(pool: pg.Pool): Promise<void> {
+  const orgs = (
+    await pool.query(`SELECT DISTINCT organization_id AS id FROM invoices`)
+  ).rows;
+  for (const o of orgs) {
+    try {
+      const dup = (await pool.query(`SELECT detect_near_duplicate_invoices($1) AS n`, [o.id])).rows[0];
+      const cross = (await pool.query(`SELECT detect_cross_account_duplicates($1) AS n`, [o.id])).rows[0];
+      const n = Number(dup.n) + Number(cross.n);
+      if (n) console.log(`detectors org ${o.id}: ${n} new insight(s)`);
+    } catch (err) {
+      console.error(`detectors ${o.id}: ${(err as Error).message}`);
+    }
+  }
+}
+
 async function syncBankAll(pool: pg.Pool): Promise<void> {
   const rows = (
     await pool.query(
@@ -161,6 +177,7 @@ export function startScheduler(pool: pg.Pool): void {
       await attachConfigured(pool);
       await syncPosAll(pool);
       await syncBankAll(pool);
+      await runDetectors(pool);
     } catch (err) {
       console.error('scheduler tick failed:', err);
     }

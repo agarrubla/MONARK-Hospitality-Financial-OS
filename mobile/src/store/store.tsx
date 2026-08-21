@@ -133,6 +133,19 @@ export interface MatchCandidate {
   invoiceNumber: string | null;
 }
 
+export interface Insight {
+  id: string;
+  kind: string;
+  title: string;
+  body: string;
+  severity: string; // 'info' | 'warning' | 'critical'
+  confidence: number;
+  status: string;
+  subjectType: string | null;
+  subjectId: string | null;
+  createdAt: string;
+}
+
 export interface PosIntegration {
   id: string;
   provider: string;
@@ -156,9 +169,10 @@ interface AppData {
   bankIntegrations: BankIntegration[];
   deposits: Deposit[];
   matchCandidates: MatchCandidate[];
+  insights: Insight[];
 }
 
-const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [], deposits: [], matchCandidates: [] };
+const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [], deposits: [], matchCandidates: [], insights: [] };
 
 export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
 export const todayISO = (): string => new Date().toISOString().slice(0, 10);
@@ -202,6 +216,8 @@ interface StoreApi {
   extractInvoice(fileBase64: string, mimeType: string): Promise<InvoiceProposal>;
   confirmDeposit(depositId: string, bankTransactionId: string): Promise<void>;
   confirmPaymentMatch(paymentId: string, bankTransactionId: string): Promise<void>;
+  askAI(question: string, history: Array<{ q: string; a: string }>): Promise<string>;
+  setInsightStatus(id: string, status: 'acknowledged' | 'actioned' | 'dismissed'): Promise<void>;
 }
 
 const StoreContext = createContext<StoreApi | null>(null);
@@ -390,6 +406,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       confirmPaymentMatch: (paymentId, bankTransactionId) =>
         run(async () => {
           await api('POST', '/reconcile/payment', { paymentId, bankTransactionId });
+          await refresh();
+        }),
+      askAI: async (question, history) => {
+        const res = await api<{ answer: string }>('POST', '/ai/ask', { question, history });
+        return res.answer;
+      },
+      setInsightStatus: (id, status) =>
+        run(async () => {
+          await api('POST', `/insights/${id}/status`, { status });
           await refresh();
         }),
     }),

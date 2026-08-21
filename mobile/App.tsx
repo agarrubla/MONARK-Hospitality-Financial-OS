@@ -17,30 +17,17 @@ import { Platform, SafeAreaView, Text, useWindowDimensions, View } from 'react-n
 import { ModuleDock } from './src/navigation/ModuleDock';
 import LiveBankingScreen from './src/screens/live/LiveBankingScreen';
 import LiveReconScreen from './src/screens/live/LiveReconScreen';
+import LiveAIScreen from './src/screens/live/LiveAIScreen';
+import LiveInsightsScreen from './src/screens/live/LiveInsightsScreen';
 import LiveAPScreen from './src/screens/live/LiveAPScreen';
 import LiveDashboardScreen from './src/screens/live/LiveDashboardScreen';
 import LivePOSScreen from './src/screens/live/LivePOSScreen';
 import LiveReportsScreen from './src/screens/live/LiveReportsScreen';
 import LiveSettingsScreen from './src/screens/live/LiveSettingsScreen';
 import LiveTreasuryScreen from './src/screens/live/LiveTreasuryScreen';
-import PlaceholderScreen from './src/screens/live/PlaceholderScreen';
 import { StoreProvider, useStore } from './src/store/store';
 import { colors } from './src/theme/tokens';
 
-const AIModules = () => (
-  <PlaceholderScreen
-    title="AI · AUTOMATIZACIÓN" sub="OCR de facturas · email · clasificación" icon="◇"
-    blurb="La IA leerá facturas desde foto/PDF/email, sugerirá categorías con confianza visible y detectará duplicados — tú siempre decides."
-    activates="Se activa con el servicio de IA en producción. La IA nunca aprueba ni paga: solo propone."
-  />
-);
-const Insights = () => (
-  <PlaceholderScreen
-    title="INTELLIGENCE" sub="Alertas y health score" icon="◎"
-    blurb="Detectores proactivos (costos, caja, duplicados, varianzas) y un score de salud explicable de tu negocio."
-    activates="Se calcula solo cuando tengas algunas semanas de datos registrados — más datos, mejores alertas."
-  />
-);
 
 const modules = [
   { key: 'dashboard', label: 'HOME', icon: '◈', Screen: LiveDashboardScreen },
@@ -50,8 +37,8 @@ const modules = [
   { key: 'reports', label: 'REPORTES', icon: '◔', Screen: LiveReportsScreen },
   { key: 'banking', label: 'BANCO', icon: '≋', Screen: LiveBankingScreen },
   { key: 'recon', label: 'CONCILIAR', icon: '⇄', Screen: LiveReconScreen },
-  { key: 'ai', label: 'AI', icon: '◇', Screen: AIModules },
-  { key: 'intel', label: 'ALERTAS', icon: '◎', Screen: Insights },
+  { key: 'ai', label: 'AI', icon: '◇', Screen: LiveAIScreen },
+  { key: 'intel', label: 'ALERTAS', icon: '◎', Screen: LiveInsightsScreen },
   { key: 'config', label: 'AJUSTES', icon: '⚙', Screen: LiveSettingsScreen },
 ] as const;
 
