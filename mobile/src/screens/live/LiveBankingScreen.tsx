@@ -10,7 +10,7 @@ import { money, useStore } from '../../store/store';
 import { colors, fMono, fSans } from '../../theme/tokens';
 
 /** Load Plaid Link (web) on demand and open it. */
-async function openPlaidLink(
+export async function openPlaidLink(
   linkToken: string,
   onSuccess: (publicToken: string) => void,
   onExit: () => void,

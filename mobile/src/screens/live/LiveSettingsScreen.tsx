@@ -5,11 +5,12 @@
  * sees them again.
  */
 import React, { useState } from 'react';
-import { Linking, Pressable, ScrollView, Text, View } from 'react-native';
+import { Linking, Platform, Pressable, ScrollView, Text, View } from 'react-native';
 import {
   card, ChoiceChips, EmptyState, Field, Header, PrimaryButton, SectionLabel,
 } from '../../components/ui';
 import { useStore } from '../../store/store';
+import { openPlaidLink } from './LiveBankingScreen';
 import { colors, fMono, fSans } from '../../theme/tokens';
 
 const PROVIDERS: Array<[string, string]> = [
@@ -22,8 +23,9 @@ const TIMEZONES: Array<[string, string]> = [
 ];
 
 export default function LiveSettingsScreen() {
-  const { data, connectPos, disconnectPos, busy, lastError, clearError } = useStore();
+  const { data, connectPos, disconnectPos, bankLinkToken, bankExchange, busy, lastError, clearError } = useStore();
   const [view, setView] = useState<'list' | 'form'>('list');
+  const [bankConnecting, setBankConnecting] = useState(false);
   const [provider, setProvider] = useState('clover');
   const [merchantId, setMerchantId] = useState('');
   const [token, setToken] = useState('');
@@ -41,6 +43,25 @@ export default function LiveSettingsScreen() {
     setToken('');
     setLocationId((l) => l || (data.locations[0]?.id ?? ''));
     setView('form');
+  };
+
+  const connectBank = () => {
+    clearError();
+    setSavedMsg('');
+    setBankConnecting(true);
+    bankLinkToken()
+      .then((lt) =>
+        openPlaidLink(
+          lt,
+          (publicToken) => {
+            bankExchange(publicToken)
+              .then(() => setBankConnecting(false))
+              .catch(() => setBankConnecting(false));
+          },
+          () => setBankConnecting(false),
+        ),
+      )
+      .catch(() => setBankConnecting(false));
   };
 
   const canSave = !!provider && !!merchantId.trim() && !!token.trim() && !!locationId && !busy;
@@ -131,11 +152,63 @@ export default function LiveSettingsScreen() {
 
           <View>
             <SectionLabel>BANCOS</SectionLabel>
-            <View style={{ ...card, padding: 14 }}>
-              <Text style={{ ...fSans(400, 11.5), lineHeight: 17, color: colors.textSecondary2 }}>
-                La conexión bancaria (Plaid para EE.UU., Belvo para Latinoamérica) se configurará aquí cuando esté activa.
-              </Text>
-            </View>
+            {data.bankAccounts.length === 0 && data.bankIntegrations.length === 0 ? (
+              <View style={{ ...card, padding: 14 }}>
+                <Text style={{ ...fSans(400, 11.5), lineHeight: 17, color: colors.textSecondary2 }}>
+                  Conecta tu cuenta bancaria con Plaid: tus movimientos entran solos y se cruzan con tus pagos y ventas. MONARK solo LEE — nunca puede mover dinero.
+                </Text>
+                <View style={{ marginTop: 12 }}>
+                  <PrimaryButton
+                    label={bankConnecting || busy ? 'Conectando…' : 'Conectar banco (Plaid)'}
+                    onPress={connectBank}
+                    disabled={bankConnecting || busy || Platform.OS !== 'web'}
+                  />
+                </View>
+                {Platform.OS !== 'web' && (
+                  <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: 6, textAlign: 'center' }}>
+                    Por ahora, conecta el banco desde la versión web de MONARK.
+                  </Text>
+                )}
+              </View>
+            ) : (
+              <View style={{ gap: 8 }}>
+                {data.bankIntegrations.map((b) => {
+                  const connected = b.status === 'connected';
+                  const accts = data.bankAccounts.length;
+                  return (
+                    <View key={b.id} style={{ ...card, paddingVertical: 12, paddingHorizontal: 14 }}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                        <Text style={{ ...fSans(600, 13), color: colors.text, flex: 1 }}>
+                          {b.provider === 'plaid' ? 'Banco (vía Plaid)' : b.provider}
+                        </Text>
+                        <View style={{ backgroundColor: connected ? '#eaf3ee' : '#f6e9e7', borderRadius: 4, paddingHorizontal: 6, paddingVertical: 2 }}>
+                          <Text style={{ ...fSans(600, 8.5, 0.08), color: connected ? colors.green : colors.red }}>
+                            {connected ? 'CONECTADO' : b.status === 'disconnected' ? 'DESCONECTADO' : 'CON ERROR'}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={{ ...fSans(400, 10.5), color: colors.muted, marginTop: 3 }}>
+                        {accts} {accts === 1 ? 'cuenta' : 'cuentas'}
+                        {b.lastSyncAt ? ` · última sincronización ${b.lastSyncAt.slice(0, 16).replace('T', ' ')}` : ' · aún sin sincronizar'}
+                      </Text>
+                      {connected && (
+                        <Pressable
+                          onPress={() => { void disconnectPos(b.id).catch(() => {}); }}
+                          style={{ marginTop: 10, borderRadius: 8, paddingVertical: 9, alignItems: 'center', borderWidth: 1, borderColor: '#d9c4c0' }}
+                        >
+                          <Text style={{ ...fSans(600, 11.5), color: colors.red }}>Desconectar</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  );
+                })}
+                <Pressable onPress={connectBank} disabled={bankConnecting || busy}>
+                  <Text style={{ ...fSans(600, 11.5), color: colors.green, textAlign: 'center', padding: 6 }}>
+                    {bankConnecting ? 'Conectando…' : '+ Conectar otra cuenta'}
+                  </Text>
+                </Pressable>
+              </View>
+            )}
           </View>
 
           <View>
