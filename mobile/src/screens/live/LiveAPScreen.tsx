@@ -3,6 +3,7 @@
  * Treasury pays. The invoice's EXPENSE DATE decides its P&L month.
  */
 import React, { useState } from 'react';
+import { Platform } from 'react-native';
 import { Pressable, ScrollView, Text, View } from 'react-native';
 import {
   card, ChoiceChips, EmptyState, Field, GhostButton, Header, PrimaryButton, SectionLabel,
@@ -35,7 +36,7 @@ const num = (s: string): number => {
 };
 
 export default function LiveAPScreen() {
-  const { data, addInvoice, setInvoiceStatus, busy, lastError } = useStore();
+  const { data, addInvoice, setInvoiceStatus, busy, lastError, extractInvoice } = useStore();
   const [view, setView] = useState<'list' | 'new' | 'detail'>('list');
   const [invId, setInvId] = useState<string | null>(null);
 
@@ -51,6 +52,46 @@ export default function LiveAPScreen() {
   const [description, setDescription] = useState('');
   const [subtotal, setSubtotal] = useState('');
   const [tax, setTax] = useState('');
+  const [aiInfo, setAiInfo] = useState<string>('');
+
+  const readWithAI = () => {
+    const g = globalThis as unknown as { document?: any };
+    if (!g.document) return;
+    const input = g.document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*,application/pdf';
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      if (file.size > 8 * 1024 * 1024) { setAiInfo('El archivo es muy grande (máx 8MB).'); return; }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result);
+        const base64 = dataUrl.slice(dataUrl.indexOf(',') + 1);
+        const mime = file.type || 'application/pdf';
+        setAiInfo('Leyendo la factura con IA…');
+        extractInvoice(base64, mime)
+          .then((p) => {
+            if (!p.legible) { setAiInfo('La IA no pudo leer este documento como factura — carga los datos a mano.'); return; }
+            const vendorMatch = data.vendors.find((v) => p.vendor_name && v.name.toLowerCase() === p.vendor_name.toLowerCase());
+            if (vendorMatch) { setVendorId(vendorMatch.id); setNewVendor(''); }
+            else if (p.vendor_name) { setVendorId(''); setNewVendor(p.vendor_name); }
+            if (p.invoice_number) setNumber(p.invoice_number);
+            if (p.invoice_date) { setInvoiceDate(p.invoice_date); setExpenseDate(p.invoice_date); }
+            if (p.due_date) setDueDate(p.due_date);
+            if (p.subtotal != null) setSubtotal(String(p.subtotal));
+            if (p.tax != null) setTax(String(p.tax));
+            if (p.description) setDescription(p.description);
+            const cat = data.categories.find((c) => p.category_name && c.name === p.category_name);
+            if (cat) setCategoryId(cat.id);
+            setAiInfo(`IA leyó la factura · confianza ${Math.round(p.confidence * 100)}% · revisa cada campo antes de guardar${p.notes ? ` · ojo: ${p.notes}` : ''}`);
+          })
+          .catch(() => setAiInfo('No se pudo leer la factura — intenta con una foto más clara o carga a mano.'));
+      };
+      reader.readAsDataURL(file);
+    };
+    input.click();
+  };
 
   const d = data.invoices.find((i) => i.id === invId);
   const vendorName = (id: string) => data.vendors.find((v) => v.id === id)?.name ?? '—';
@@ -125,6 +166,22 @@ export default function LiveAPScreen() {
 
       {view === 'new' && (
         <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 24 }}>
+          {Platform.OS === 'web' && (
+            <Pressable
+              onPress={readWithAI}
+              disabled={busy}
+              style={{ borderRadius: 10, paddingVertical: 12, alignItems: 'center', backgroundColor: colors.ink, marginBottom: 10 }}
+            >
+              <Text style={{ ...fSans(600, 12.5), color: colors.gold }}>
+                {busy ? 'Leyendo…' : '◇ Leer factura con IA (foto o PDF)'}
+              </Text>
+            </Pressable>
+          )}
+          {!!aiInfo && (
+            <View style={{ backgroundColor: '#eaf3ee', borderRadius: 10, padding: 12, marginBottom: 10 }}>
+              <Text style={{ ...fSans(500, 11), lineHeight: 16.5, color: colors.green }}>{aiInfo}</Text>
+            </View>
+          )}
           <View style={{ ...card, padding: 16 }}>
             <SectionLabel>PROVEEDOR</SectionLabel>
             {data.vendors.length > 0 && (

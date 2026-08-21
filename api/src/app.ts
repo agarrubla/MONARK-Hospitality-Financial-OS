@@ -18,6 +18,7 @@ import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypt
 import type pg from 'pg';
 import { resolveCredentials } from './integrations/sync.js';
 import { saveSecret } from './secrets.js';
+import { extractInvoice } from './ai/invoiceExtract.js';
 
 /* ── Passwords (scrypt, per-user salt) ───────────────────────────────────── */
 
@@ -112,7 +113,7 @@ const plaidPlatform = (): Record<string, string> | null => {
 const plaidBase = (env?: string): string => `https://${env ?? 'sandbox'}.plaid.com`;
 
 export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): FastifyInstance {
-  const app = Fastify();
+  const app = Fastify({ bodyLimit: 15 * 1024 * 1024 });
   void app.register(cors, { origin: true });
   const verifyPos = opts.verifyPos ?? defaultVerifyPos;
 
@@ -383,6 +384,28 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
         matchCandidates,
       };
     });
+  });
+
+  /* ── IA: leer factura desde foto/PDF (solo propone) ────────────────────── */
+
+  app.post('/invoices/extract', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const b = req.body as { fileBase64?: string; mimeType?: string };
+    if (!b.fileBase64 || !b.mimeType) return reply.code(400).send({ error: 'Falta el archivo de la factura.' });
+    if (b.fileBase64.length > 12 * 1024 * 1024) {
+      return reply.code(400).send({ error: 'El archivo es muy grande — intenta con una foto más liviana (máx ~8MB).' });
+    }
+    const categories = await asUser(ctx, async (c) =>
+      (await c.query(`SELECT name FROM expense_categories WHERE is_active ORDER BY name`)).rows.map((r) => r.name as string));
+    try {
+      const proposal = await extractInvoice(b.fileBase64, b.mimeType, categories);
+      return { proposal };
+    } catch (err) {
+      const msg = String((err as Error).message ?? err);
+      if (msg.includes('vault')) return reply.code(400).send({ error: 'La IA aún no está configurada en el servidor.' });
+      return reply.code(502).send({ error: `No se pudo leer la factura: ${msg}` });
+    }
   });
 
   /* ── Conciliación ──────────────────────────────────────────────────────── */

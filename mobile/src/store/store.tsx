@@ -89,6 +89,21 @@ export interface BankIntegration {
   lastSyncAt: string | null;
 }
 
+export interface InvoiceProposal {
+  legible: boolean;
+  vendor_name: string | null;
+  invoice_number: string | null;
+  invoice_date: string | null;
+  due_date: string | null;
+  subtotal: number | null;
+  tax: number | null;
+  total: number | null;
+  description: string | null;
+  category_name: string | null;
+  confidence: number;
+  notes: string | null;
+}
+
 export interface Deposit {
   id: string;
   locationId: string;
@@ -182,6 +197,7 @@ interface StoreApi {
   disconnectPos(id: string): Promise<void>;
   bankLinkToken(): Promise<string>;
   bankExchange(publicToken: string): Promise<void>;
+  extractInvoice(fileBase64: string, mimeType: string): Promise<InvoiceProposal>;
   confirmDeposit(depositId: string, bankTransactionId: string): Promise<void>;
   confirmPaymentMatch(paymentId: string, bankTransactionId: string): Promise<void>;
 }
@@ -351,6 +367,19 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           await api('POST', '/bank/exchange', { publicToken });
           await refresh();
         }),
+      extractInvoice: async (fileBase64, mimeType) => {
+        setBusy(true);
+        setLastError(null);
+        try {
+          const res = await api<{ proposal: InvoiceProposal }>('POST', '/invoices/extract', { fileBase64, mimeType });
+          return res.proposal;
+        } catch (err) {
+          setLastError(err instanceof Error ? err.message : String(err));
+          throw err;
+        } finally {
+          setBusy(false);
+        }
+      },
       confirmDeposit: (depositId, bankTransactionId) =>
         run(async () => {
           await api('POST', '/reconcile/deposit', { depositId, bankTransactionId });
