@@ -12,7 +12,7 @@
  *      "credentialsRef": "clover-casa-d", "locationCode": "CASA-D" }]
  */
 import pg from 'pg';
-import { resolveCredentials, syncPosIntegration } from './integrations/sync.js';
+import { resolveCredentialsFor, syncPosIntegration } from './integrations/sync.js';
 
 const POS_PROVIDERS = new Set(['clover', 'toast', 'square', 'lightspeed']);
 const BACKFILL_DAYS = Number(process.env.SYNC_BACKFILL_DAYS ?? 30);
@@ -70,45 +70,56 @@ async function attachConfigured(pool: pg.Pool): Promise<void> {
   }
 }
 
+/** Import every closed-but-missing day in the backfill window for one integration. */
+export async function syncPosWindow(pool: pg.Pool, integrationId: string): Promise<number> {
+  const row = (
+    await pool.query(
+      `SELECT id, provider, location_id, credentials_ref FROM integrations WHERE id = $1`,
+      [integrationId],
+    )
+  ).rows[0];
+  if (!row || !row.location_id) return 0;
+  const creds = await resolveCredentialsFor(pool, row.credentials_ref);
+  const tz = creds.timezone ?? 'UTC';
+  const have = new Set(
+    (
+      await pool.query(
+        `SELECT business_date::text AS d FROM pos_sales
+          WHERE location_id = $1 AND source = $2::pos_source`,
+        [row.location_id, row.provider],
+      )
+    ).rows.map((r) => r.d as string),
+  );
+  let imported = 0;
+  for (let ago = 1; ago <= BACKFILL_DAYS; ago++) {
+    const day = dayInTz(tz, ago);
+    if (have.has(day)) continue;
+    try {
+      const res = await syncPosIntegration(pool, row.id, day);
+      if (res.imported) imported++;
+    } catch (err) {
+      console.error(`sync ${row.provider} ${row.id} ${day}: ${(err as Error).message}`);
+      break; // credentials/network problem — no point hammering the rest of the window
+    }
+  }
+  if (imported) console.log(`sync ${row.provider}: imported ${imported} day(s)`);
+  return imported;
+}
+
 async function syncPosAll(pool: pg.Pool): Promise<void> {
   const rows = (
     await pool.query(
-      `SELECT id, provider, location_id, credentials_ref FROM integrations
+      `SELECT id FROM integrations
         WHERE provider::text = ANY($1) AND status IN ('connected', 'error') AND location_id IS NOT NULL`,
       [[...POS_PROVIDERS]],
     )
   ).rows;
   for (const row of rows) {
-    let creds: Record<string, string>;
     try {
-      creds = resolveCredentials(row.credentials_ref);
+      await syncPosWindow(pool, row.id);
     } catch (err) {
-      console.error(`sync ${row.provider} ${row.id}: no credentials in vault (${(err as Error).message})`);
-      continue;
+      console.error(`sync ${row.id}: ${(err as Error).message}`);
     }
-    const tz = creds.timezone ?? 'UTC';
-    const have = new Set(
-      (
-        await pool.query(
-          `SELECT business_date::text AS d FROM pos_sales
-            WHERE location_id = $1 AND source = $2::pos_source`,
-          [row.location_id, row.provider],
-        )
-      ).rows.map((r) => r.d as string),
-    );
-    let imported = 0;
-    for (let ago = 1; ago <= BACKFILL_DAYS; ago++) {
-      const day = dayInTz(tz, ago);
-      if (have.has(day)) continue;
-      try {
-        const res = await syncPosIntegration(pool, row.id, day);
-        if (res.imported) imported++;
-      } catch (err) {
-        console.error(`sync ${row.provider} ${row.id} ${day}: ${(err as Error).message}`);
-        break; // credentials/network problem — no point hammering the rest of the window
-      }
-    }
-    if (imported) console.log(`sync ${row.provider}: imported ${imported} day(s)`);
   }
 }
 

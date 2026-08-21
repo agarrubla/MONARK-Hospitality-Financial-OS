@@ -12,7 +12,7 @@ import {
 import { colors, fMono, fSans } from '../../theme/tokens';
 
 export default function LiveDashboardScreen() {
-  const { data, ready, addLocation, logout, busy, lastError } = useStore();
+  const { data, ready, addLocation, busy, lastError } = useStore();
   const [locName, setLocName] = useState('');
   const [locCode, setLocCode] = useState('');
 
@@ -29,7 +29,7 @@ export default function LiveDashboardScreen() {
           <View style={{ backgroundColor: colors.ink, borderRadius: 14, padding: 18 }}>
             <Text style={{ ...fSans(600, 9.5, 0.14), color: colors.gold, marginBottom: 8 }}>EMPEZAR</Text>
             <Text style={{ ...fSans(400, 12), lineHeight: 18, color: '#c7d4cd' }}>
-              La app arranca vacía: registra tu primer local y empieza a cargar ventas, facturas y pagos. Todo se guarda en tu cuenta en la nube — entra desde cualquier dispositivo y verás lo mismo. Cada número que veas saldrá de lo que tú registres.
+              El módulo arranca vacío: registra tu primer local y empieza a cargar ventas, facturas y pagos. Todo se guarda de forma segura en la nube de MONARK. Cada número que veas saldrá de lo que tú registres o de tus conexiones (POS, banco).
             </Text>
           </View>
           <View style={{ ...card, padding: 16 }}>
@@ -119,9 +119,6 @@ export default function LiveDashboardScreen() {
           </View>
         </View>
 
-        <Text onPress={() => void logout()} style={{ ...fSans(600, 11), color: colors.muted, textAlign: 'center', paddingVertical: 8 }}>
-          Cerrar sesión ({data.orgName})
-        </Text>
       </ScrollView>
     </View>
   );

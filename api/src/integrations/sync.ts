@@ -10,6 +10,7 @@ import type pg from 'pg';
 import type { BankFeedAdapter, PosAdapter } from './types.js';
 import { bankAdapters } from './banks.js';
 import { posAdapters } from './pos.js';
+import { loadSecret } from '../secrets.js';
 
 export interface SyncStats {
   accountsUpserted: number;
@@ -30,6 +31,17 @@ export function resolveCredentials(ref: string): Record<string, string> {
   return creds;
 }
 
+/** Env vault first, then the encrypted integration_secrets table. */
+export async function resolveCredentialsFor(pool: pg.Pool, ref: string): Promise<Record<string, string>> {
+  try {
+    return resolveCredentials(ref);
+  } catch {
+    const stored = await loadSecret(pool, ref);
+    if (!stored) throw new Error(`no credentials for ref "${ref}" (vault or database)`);
+    return stored;
+  }
+}
+
 export async function syncBankIntegration(
   pool: pg.Pool,
   integrationId: string,
@@ -42,7 +54,7 @@ export async function syncBankIntegration(
 
   const adapter = opts.adapter ?? bankAdapters[intRow.provider];
   if (!adapter) throw new Error(`no bank adapter for provider "${intRow.provider}"`);
-  const creds = opts.credentials ?? resolveCredentials(intRow.credentials_ref);
+  const creds = opts.credentials ?? (await resolveCredentialsFor(pool, intRow.credentials_ref));
 
   const result = await adapter.sync(creds, intRow.sync_cursor);
   const stats: SyncStats = { accountsUpserted: 0, txnsInserted: 0, txnsSkipped: 0, autoMatched: 0 };
@@ -142,7 +154,7 @@ export async function syncPosIntegration(
 
   const adapter = opts.adapter ?? posAdapters[intRow.provider];
   if (!adapter) throw new Error(`no POS adapter for provider "${intRow.provider}"`);
-  const creds = opts.credentials ?? resolveCredentials(intRow.credentials_ref);
+  const creds = opts.credentials ?? (await resolveCredentialsFor(pool, intRow.credentials_ref));
 
   const day = await adapter.fetchDay(creds, intRow.external_ref, businessDate);
   if (!day) return { imported: false, skipped: false, depositsExpected: 0 };

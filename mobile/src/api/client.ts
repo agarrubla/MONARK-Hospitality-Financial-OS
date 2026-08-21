@@ -12,6 +12,36 @@ export const getToken = (): Promise<string | null> => AsyncStorage.getItem(TOKEN
 export const setToken = (t: string): Promise<void> => AsyncStorage.setItem(TOKEN_KEY, t);
 export const clearToken = (): Promise<void> => AsyncStorage.removeItem(TOKEN_KEY);
 
+/**
+ * Device credentials for the silent module session. This module runs inside
+ * the MONARK super app: identity will come from the super-app login later,
+ * so for now each device provisions its own account transparently.
+ */
+const DEV_EMAIL_KEY = 'monark.device.email';
+const DEV_PASS_KEY = 'monark.device.pass';
+
+export async function getDeviceCreds(): Promise<{ email: string; password: string } | null> {
+  const [email, password] = await Promise.all([
+    AsyncStorage.getItem(DEV_EMAIL_KEY),
+    AsyncStorage.getItem(DEV_PASS_KEY),
+  ]);
+  return email && password ? { email, password } : null;
+}
+
+export async function createDeviceCreds(): Promise<{ email: string; password: string }> {
+  const rand = (len: number): string => {
+    let s = '';
+    while (s.length < len) s += Math.random().toString(36).slice(2) + Date.now().toString(36);
+    return s.slice(0, len);
+  };
+  const creds = { email: `device-${rand(20)}@monark.local`, password: rand(40) };
+  await Promise.all([
+    AsyncStorage.setItem(DEV_EMAIL_KEY, creds.email),
+    AsyncStorage.setItem(DEV_PASS_KEY, creds.password),
+  ]);
+  return creds;
+}
+
 export class ApiError extends Error {
   status: number;
   constructor(status: number, message: string) {

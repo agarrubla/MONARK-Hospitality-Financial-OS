@@ -5,7 +5,7 @@
  * paying an August invoice in September never creates a September expense.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, ApiError, clearToken, getToken, setToken } from '../api/client';
+import { api, ApiError, clearToken, createDeviceCreds, getDeviceCreds, getToken, setToken } from '../api/client';
 
 export interface Location { id: string; name: string; code: string }
 export interface Vendor { id: string; name: string }
@@ -53,6 +53,15 @@ export interface PosDay {
   source?: string; // 'manual' | 'clover' | 'toast' | 'square' | 'lightspeed'
 }
 
+export interface PosIntegration {
+  id: string;
+  provider: string;
+  merchantId: string;
+  locationId: string | null;
+  status: string;
+  lastSyncAt: string | null;
+}
+
 interface AppData {
   orgName: string;
   locations: Location[];
@@ -61,9 +70,10 @@ interface AppData {
   invoices: Invoice[];
   payments: Payment[];
   posDays: PosDay[];
+  integrations: PosIntegration[];
 }
 
-const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [] };
+const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [] };
 
 export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
 export const todayISO = (): string => new Date().toISOString().slice(0, 10);
@@ -86,6 +96,7 @@ interface StoreApi {
   register(email: string, password: string, orgName: string): Promise<void>;
   login(email: string, password: string): Promise<void>;
   logout(): Promise<void>;
+  ensureSession(): Promise<void>;
   refresh(): Promise<void>;
   addLocation(name: string, code: string): Promise<void>;
   addInvoice(inv: {
@@ -96,6 +107,8 @@ interface StoreApi {
   setInvoiceStatus(id: string, status: InvoiceStatus): Promise<void>;
   recordPayment(invoiceId: string, date: string, method: string, ref?: string): Promise<void>;
   addPosDay(day: { locationId: string; date: string; gross: number; discounts: number; tax: number; tips: number }): Promise<void>;
+  connectPos(input: { provider: string; merchantId: string; apiToken: string; locationId: string; timezone?: string }): Promise<void>;
+  disconnectPos(id: string): Promise<void>;
 }
 
 const StoreContext = createContext<StoreApi | null>(null);
@@ -119,27 +132,65 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
   const [lastError, setLastError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    const state = await api<AppData & { invoices: Array<Omit<Invoice, 'history'>> }>('GET', '/state');
+    const [state, ints] = await Promise.all([
+      api<Omit<AppData, 'integrations'> & { invoices: Array<Omit<Invoice, 'history'>> }>('GET', '/state'),
+      api<{ integrations: PosIntegration[] }>('GET', '/integrations'),
+    ]);
     setData({
       ...state,
       invoices: state.invoices.map((i) => ({ ...i, history: synthesizeHistory(i) })),
+      integrations: ints.integrations,
     });
     setAuthed(true);
   }, []);
 
+  /**
+   * Silent module session. This module lives inside the MONARK super app:
+   * the super-app login will own identity later, so there is no login screen
+   * here — the device provisions (or resumes) its own account transparently.
+   */
+  const ensureSession = useCallback(async () => {
+    setLastError(null);
+    try {
+      if (await getToken()) {
+        await refresh();
+        return;
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 401) await clearToken();
+      else throw err;
+    }
+    const stored = await getDeviceCreds();
+    if (stored) {
+      try {
+        const res = await api<{ token: string }>('POST', '/auth/login', stored);
+        await setToken(res.token);
+        await refresh();
+        return;
+      } catch (err) {
+        if (!(err instanceof ApiError && err.status === 401)) throw err;
+        // device creds no longer valid server-side — fall through to re-provision
+      }
+    }
+    const creds = await createDeviceCreds();
+    const res = await api<{ token: string }>('POST', '/auth/register', {
+      email: creds.email, password: creds.password, orgName: 'MONARK',
+    });
+    await setToken(res.token);
+    await refresh();
+  }, [refresh]);
+
   useEffect(() => {
     (async () => {
       try {
-        if (await getToken()) await refresh();
+        await ensureSession();
       } catch (err) {
-        if (err instanceof ApiError && (err.status === 401 || err.status === 0)) {
-          if (err.status === 401) await clearToken();
-        }
+        setLastError(err instanceof Error ? err.message : String(err));
       } finally {
         setReady(true);
       }
     })();
-  }, [refresh]);
+  }, [ensureSession]);
 
   const run = useCallback(
     async (fn: () => Promise<void>) => {
@@ -178,6 +229,7 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
         setAuthed(false);
         setData(EMPTY);
       },
+      ensureSession: () => run(ensureSession),
       refresh,
       addLocation: (name, code) =>
         run(async () => {
@@ -205,8 +257,18 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           await api('POST', '/pos-days', day);
           await refresh();
         }),
+      connectPos: (input) =>
+        run(async () => {
+          await api('POST', '/integrations', input);
+          await refresh();
+        }),
+      disconnectPos: (id) =>
+        run(async () => {
+          await api('POST', `/integrations/${id}/disconnect`, {});
+          await refresh();
+        }),
     }),
-    [data, ready, authed, busy, lastError, refresh, run],
+    [data, ready, authed, busy, lastError, refresh, run, ensureSession],
   );
 
   return <StoreContext.Provider value={apiStore}>{children}</StoreContext.Provider>;

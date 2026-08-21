@@ -53,6 +53,7 @@ export function Field(props: {
   placeholder?: string;
   keyboardType?: 'default' | 'decimal-pad';
   mono?: boolean;
+  secure?: boolean;
 }) {
   return (
     <View style={{ marginBottom: 10 }}>
@@ -63,6 +64,8 @@ export function Field(props: {
         placeholder={props.placeholder}
         placeholderTextColor={colors.faint}
         keyboardType={props.keyboardType ?? 'default'}
+        secureTextEntry={props.secure}
+        autoCapitalize={props.secure ? 'none' : undefined}
         style={{
           borderWidth: 1, borderColor: colors.sheetHandle, borderRadius: 8,
           paddingVertical: 9, paddingHorizontal: 11,

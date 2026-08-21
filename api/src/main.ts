@@ -5,13 +5,17 @@
 import pg from 'pg';
 import { pgConfig, runMigrations } from '../../scripts/migrate.js';
 import { buildProductApp } from './app.js';
-import { startScheduler } from './scheduler.js';
+import { startScheduler, syncPosWindow } from './scheduler.js';
 
 async function main() {
   await runMigrations();
 
   const pool = new pg.Pool({ ...pgConfig(), max: 10 });
-  const app = buildProductApp(pool);
+  const app = buildProductApp(pool, {
+    syncAfterConnect: (integrationId) => {
+      void syncPosWindow(pool, integrationId).catch((err) => console.error('post-connect sync:', err));
+    },
+  });
 
   // Unauthenticated liveness probe (no data, no permissions involved).
   app.get('/health', async () => {

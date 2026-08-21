@@ -16,6 +16,7 @@ import cors from '@fastify/cors';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type pg from 'pg';
+import { saveSecret } from './secrets.js';
 
 /* ── Passwords (scrypt, per-user salt) ───────────────────────────────────── */
 
@@ -59,9 +60,47 @@ const toAppStatus = (s: string): string =>
 
 interface SessionCtx { userId: string; orgId: string }
 
-export function buildProductApp(pool: pg.Pool): FastifyInstance {
+export interface PosVerifyResult {
+  ok: boolean;
+  name?: string;
+  error?: string;
+}
+
+/** Read-only token check against the provider before anything is stored. */
+async function defaultVerifyPos(
+  provider: string,
+  merchantId: string,
+  creds: Record<string, string>,
+): Promise<PosVerifyResult> {
+  if (provider === 'clover') {
+    const base = creds.env === 'sandbox' ? 'https://apisandbox.dev.clover.com' : 'https://api.clover.com';
+    let res: Response;
+    try {
+      res = await fetch(`${base}/v3/merchants/${merchantId}`, {
+        headers: { authorization: `Bearer ${creds.api_token}` },
+      });
+    } catch {
+      return { ok: false, error: 'No se pudo contactar a Clover — intenta de nuevo.' };
+    }
+    if (res.status === 401) return { ok: false, error: 'Clover rechazó el token. Revisa que lo copiaste completo.' };
+    if (res.status === 404) return { ok: false, error: 'Clover no encontró ese Merchant ID con este token.' };
+    if (!res.ok) return { ok: false, error: `Clover respondió con error ${res.status}.` };
+    const j = (await res.json()) as { name?: string };
+    return { ok: true, name: j.name };
+  }
+  return { ok: false, error: 'Por ahora solo Clover está disponible; Toast, Square y Lightspeed vienen en camino.' };
+}
+
+export interface ProductAppOptions {
+  verifyPos?: typeof defaultVerifyPos;
+  /** Kick a backfill right after a POS connects (off in tests). */
+  syncAfterConnect?: (integrationId: string) => void;
+}
+
+export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): FastifyInstance {
   const app = Fastify();
   void app.register(cors, { origin: true });
+  const verifyPos = opts.verifyPos ?? defaultVerifyPos;
 
   /** Run fn as monark_app under the caller's RLS context. */
   const asUser = async <T>(ctx: SessionCtx, fn: (c: pg.PoolClient) => Promise<T>): Promise<T> => {
@@ -403,6 +442,81 @@ export function buildProductApp(pool: pg.Pool): FastifyInstance {
       }
       throw err;
     }
+  });
+
+  /* ── Integraciones POS (ajustes) ───────────────────────────────────────── */
+
+  const POS_SET = new Set(['clover', 'toast', 'square', 'lightspeed']);
+
+  app.get('/integrations', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    return asUser(ctx, async (c) => ({
+      integrations: (
+        await c.query(
+          `SELECT id, provider::text AS provider, external_ref AS "merchantId",
+                  location_id AS "locationId", status::text AS status,
+                  last_sync_at::text AS "lastSyncAt"
+             FROM integrations WHERE provider::text = ANY($1) ORDER BY created_at`,
+          [[...POS_SET]],
+        )
+      ).rows,
+    }));
+  });
+
+  app.post('/integrations', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const b = req.body as {
+      provider: string; merchantId: string; apiToken: string; locationId: string; timezone?: string;
+    };
+    if (!POS_SET.has(b.provider) || !b.merchantId?.trim() || !b.apiToken?.trim() || !b.locationId) {
+      return reply.code(400).send({ error: 'Faltan datos: proveedor, Merchant ID, token y local son obligatorios.' });
+    }
+    // The location must be the caller's (RLS-checked read).
+    const loc = await asUser(ctx, async (c) =>
+      (await c.query(`SELECT id FROM locations WHERE id = $1`, [b.locationId])).rows[0]);
+    if (!loc) return reply.code(400).send({ error: 'Ese local no existe en tu organización.' });
+
+    const creds: Record<string, string> = {
+      api_token: b.apiToken.trim(),
+      timezone: b.timezone?.trim() || 'America/New_York',
+    };
+    const check = await verifyPos(b.provider, b.merchantId.trim(), creds);
+    if (!check.ok) return reply.code(400).send({ error: check.error ?? 'El proveedor rechazó las credenciales.' });
+
+    // Service context: encrypted secret + integration row (validated above).
+    const ref = `db:${ctx.orgId}:${b.provider}:${b.merchantId.trim()}`;
+    await saveSecret(pool, ref, ctx.orgId, creds);
+    const row = (
+      await pool.query(
+        `INSERT INTO integrations (organization_id, provider, external_ref, location_id,
+                                   credentials_ref, scopes, status)
+         VALUES ($1, $2::integration_provider, $3, $4, $5, $6::jsonb, 'connected')
+         ON CONFLICT (organization_id, provider, external_ref)
+         DO UPDATE SET credentials_ref = EXCLUDED.credentials_ref, location_id = EXCLUDED.location_id,
+                       status = 'connected'
+         RETURNING id`,
+        [ctx.orgId, b.provider, b.merchantId.trim(), b.locationId, ref, JSON.stringify(['payments.read'])],
+      )
+    ).rows[0];
+    opts.syncAfterConnect?.(row.id);
+    return { ok: true, id: row.id, merchantName: check.name ?? null };
+  });
+
+  app.post('/integrations/:id/disconnect', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const { id } = req.params as { id: string };
+    // RLS-checked ownership before the service-context secret delete.
+    const row = await asUser(ctx, async (c) =>
+      (await c.query(`SELECT id, credentials_ref FROM integrations WHERE id = $1`, [id])).rows[0]);
+    if (!row) return reply.code(404).send({ error: 'Integración no encontrada.' });
+    await pool.query(`UPDATE integrations SET status = 'disconnected' WHERE id = $1`, [id]);
+    if ((row.credentials_ref as string).startsWith('db:')) {
+      await pool.query(`DELETE FROM integration_secrets WHERE ref = $1 AND organization_id = $2`, [row.credentials_ref, ctx.orgId]);
+    }
+    return { ok: true };
   });
 
   return app;
