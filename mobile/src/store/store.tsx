@@ -121,7 +121,7 @@ export interface Deposit {
 }
 
 export interface DepositSuggestion {
-  bankTransactionId: string;
+  bankTransactionIds: string[];
   postedAt: string;
   amount: number;
   depositIds: string[];
@@ -226,7 +226,7 @@ interface StoreApi {
   bankExchange(publicToken: string): Promise<void>;
   extractInvoice(fileBase64: string, mimeType: string): Promise<InvoiceProposal>;
   confirmDeposit(depositId: string, bankTransactionId: string): Promise<void>;
-  confirmDepositGroup(depositIds: string[], bankTransactionId: string): Promise<void>;
+  confirmDepositGroup(depositIds: string[], bankTransactionIds: string[]): Promise<void>;
   confirmPaymentMatch(paymentId: string, bankTransactionId: string): Promise<void>;
   askAI(question: string, history: Array<{ q: string; a: string }>): Promise<string>;
   setInsightStatus(id: string, status: 'acknowledged' | 'actioned' | 'dismissed'): Promise<void>;
@@ -415,9 +415,9 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
           await api('POST', '/reconcile/deposit', { depositId, bankTransactionId });
           await refresh();
         }),
-      confirmDepositGroup: (depositIds, bankTransactionId) =>
+      confirmDepositGroup: (depositIds, bankTransactionIds) =>
         run(async () => {
-          await api('POST', '/reconcile/deposit-group', { depositIds, bankTransactionId });
+          await api('POST', '/reconcile/deposit-group', { depositIds, bankTransactionIds });
           await refresh();
         }),
       confirmPaymentMatch: (paymentId, bankTransactionId) =>

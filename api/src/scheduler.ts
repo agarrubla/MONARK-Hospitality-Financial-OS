@@ -158,7 +158,7 @@ async function runDetectors(pool: pg.Pool): Promise<void> {
                 'detector-v1'
            FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
           WHERE ba.organization_id = $1 AND bt.amount < 0 AND bt.match_status = 'unmatched'
-            AND bt.description_raw ~* '(priority|merch(ant)? (serv|svcs|bnkcd)|bankcard|bkcd|mtot disc|card proc|pmt sys)'
+            AND bt.description_raw ~* '(priority|merch(ant)? (serv|svcs|bnkcd)|bankcard|bkcd|mtot disc|des:discount|fdms|card proc|pmt sys)'
             AND NOT EXISTS (SELECT 1 FROM ai_insights i
                              WHERE i.kind = 'recommendation' AND i.subject_id = bt.id)
          RETURNING id`,

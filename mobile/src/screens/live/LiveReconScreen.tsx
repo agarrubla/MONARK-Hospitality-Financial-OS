@@ -57,9 +57,9 @@ export default function LiveReconScreen() {
           <>
             <SectionLabel>CRUCES SUGERIDOS · CONFIRMA TÚ</SectionLabel>
             {data.depositSuggestions.map((sg) => (
-              <View key={sg.bankTransactionId} style={{ ...card, paddingVertical: 12, paddingHorizontal: 14, borderColor: '#bcd3c9', borderWidth: 1.5 }}>
+              <View key={sg.bankTransactionIds.join(',')} style={{ ...card, paddingVertical: 12, paddingHorizontal: 14, borderColor: '#bcd3c9', borderWidth: 1.5 }}>
                 <Text style={{ ...fSans(600, 12.5), color: colors.text }}>
-                  Abono {money(sg.amount)} · llegó {sg.postedAt}
+                  {sg.bankTransactionIds.length === 1 ? 'Abono' : `${sg.bankTransactionIds.length} abonos del procesador ·`} {money(sg.amount)} · {sg.bankTransactionIds.length === 1 ? 'llegó' : 'llegaron'} {sg.postedAt}
                 </Text>
                 <Text style={{ ...fSans(400, 10.5), color: colors.muted, marginTop: 3 }}>
                   cubre {sg.depositIds.length === 1 ? `las ${sg.type === 'card_batch' ? 'tarjetas' : 'efectivo'} de ${sg.coversFrom}` : `${sg.depositIds.length} días de ${sg.type === 'card_batch' ? 'tarjetas' : 'efectivo'} (${sg.coversFrom} → ${sg.coversTo})`} · suma exacta al centavo
@@ -68,7 +68,7 @@ export default function LiveReconScreen() {
                   <PrimaryButton
                     label="Confirmar cruce"
                     disabled={busy}
-                    onPress={() => { void confirmDepositGroup(sg.depositIds, sg.bankTransactionId).catch(() => {}); }}
+                    onPress={() => { void confirmDepositGroup(sg.depositIds, sg.bankTransactionIds).catch(() => {}); }}
                   />
                 </View>
               </View>

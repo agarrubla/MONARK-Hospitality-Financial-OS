@@ -364,7 +364,8 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
       // deposits of the same type whose sum is exact to the cent.
       const credits = (
         await pool.query(
-          `SELECT bt.id, bt.posted_at::text AS "postedAt", bt.amount::float8 AS amount
+          `SELECT bt.id, bt.posted_at::text AS "postedAt", bt.amount::float8 AS amount,
+                  bt.description_raw AS description
              FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
             WHERE ba.organization_id = $1 AND bt.match_status = 'unmatched' AND bt.amount > 0
             ORDER BY bt.posted_at LIMIT 200`,
@@ -372,19 +373,40 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
         )
       ).rows as Array<{ id: string; postedAt: string; amount: number }>;
       const cents = (n: number) => Math.round(n * 100);
+      // Processor batches land as SEVERAL same-day credits (one per device
+      // batch), and one settlement day can cover several nights — so we match
+      // both single credits and same-day clusters of processor-looking
+      // credits against consecutive runs of expected days.
+      const isProcessor = (desc: string) => /bankcard|mtot|merch|clover|card\s*proc|pmt\s*sys/i.test(desc);
+      const creditsFull = credits as Array<{ id: string; postedAt: string; amount: number; description?: string }>;
+      const clusters: Array<{ ids: string[]; postedAt: string; amount: number }> = [];
+      for (const cr of creditsFull) clusters.push({ ids: [cr.id], postedAt: cr.postedAt, amount: cr.amount });
+      const byDay = new Map<string, Array<{ id: string; amount: number }>>();
+      for (const cr of creditsFull) {
+        if (!isProcessor(cr.description ?? '')) continue;
+        const list = byDay.get(cr.postedAt) ?? [];
+        list.push({ id: cr.id, amount: cr.amount });
+        byDay.set(cr.postedAt, list);
+      }
+      for (const [day, list] of byDay) {
+        if (list.length > 1) {
+          clusters.push({ ids: list.map((x) => x.id), postedAt: day, amount: list.reduce((a, x) => a + x.amount, 0) });
+        }
+      }
+      clusters.sort((a, b) => b.ids.length - a.ids.length); // prefer full-day clusters
       const usedDeposit = new Set<string>();
       const usedCredit = new Set<string>();
       const depositSuggestions: Array<{
-        bankTransactionId: string; postedAt: string; amount: number;
+        bankTransactionIds: string[]; postedAt: string; amount: number;
         depositIds: string[]; type: string; coversFrom: string; coversTo: string;
       }> = [];
       for (const type of ['card_batch', 'cash_deposit']) {
         const exp = deposits
           .filter((d) => d.status === 'expected' && d.type === type)
           .sort((a, b) => String(a.coversFrom).localeCompare(String(b.coversFrom)));
-        for (const cr of credits) {
-          if (usedCredit.has(cr.id)) continue;
-          const target = cents(cr.amount);
+        for (const cl of clusters) {
+          if (cl.ids.some((id) => usedCredit.has(id))) continue;
+          const target = cents(cl.amount);
           outer:
           for (let i = 0; i < exp.length; i++) {
             if (usedDeposit.has(exp[i]!.id)) continue;
@@ -396,12 +418,12 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
               if (sum === target) {
                 const run = exp.slice(i, j + 1);
                 const lastDay = String(run[run.length - 1]!.coversFrom);
-                const dayDiff = (Date.parse(cr.postedAt) - Date.parse(lastDay)) / 86_400_000;
-                if (dayDiff < 0 || dayDiff > 8) break; // credit must land shortly after the last covered night
+                const dayDiff = (Date.parse(cl.postedAt) - Date.parse(lastDay)) / 86_400_000;
+                if (dayDiff < 0 || dayDiff > 8) break; // settlement lands shortly after the last covered night
                 run.forEach((r) => usedDeposit.add(r.id));
-                usedCredit.add(cr.id);
+                cl.ids.forEach((id) => usedCredit.add(id));
                 depositSuggestions.push({
-                  bankTransactionId: cr.id, postedAt: cr.postedAt, amount: cr.amount,
+                  bankTransactionIds: cl.ids, postedAt: cl.postedAt, amount: cl.amount,
                   depositIds: run.map((r) => r.id as string), type,
                   coversFrom: String(run[0]!.coversFrom), coversTo: lastDay,
                 });
@@ -629,8 +651,9 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
   app.post('/reconcile/deposit-group', async (req, reply) => {
     const ctx = await authenticate(req, reply);
     if (!ctx) return;
-    const b = req.body as { depositIds?: string[]; bankTransactionId?: string };
-    if (!b.depositIds?.length || !b.bankTransactionId) return reply.code(400).send({ error: 'Faltan datos del cruce.' });
+    const b = req.body as { depositIds?: string[]; bankTransactionIds?: string[]; bankTransactionId?: string };
+    const txnIds = b.bankTransactionIds ?? (b.bankTransactionId ? [b.bankTransactionId] : []);
+    if (!b.depositIds?.length || !txnIds.length) return reply.code(400).send({ error: 'Faltan datos del cruce.' });
     const c = await pool.connect();
     try {
       await c.query('BEGIN');
@@ -646,23 +669,43 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
       if (new Set(rows.map((r) => r.deposit_type)).size > 1 || new Set(rows.map((r) => r.location_id)).size > 1) {
         throw new Error('El grupo debe ser del mismo tipo y local.');
       }
+      const credits = (
+        await c.query(
+          `SELECT bt.id, bt.posted_at, bt.amount::float8 AS amount
+             FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+            WHERE bt.id = ANY($1) AND ba.organization_id = $2 AND bt.match_status = 'unmatched' AND bt.amount > 0`,
+          [txnIds, ctx.orgId],
+        )
+      ).rows;
+      if (credits.length !== txnIds.length) throw new Error('Alguno de los abonos ya no está disponible.');
+      const cents = (n: number) => Math.round(n * 100);
+      const expectedTotal = rows.reduce((a, r) => a + cents(Number(r.amt)), 0);
+      const creditTotal = credits.reduce((a, r) => a + cents(Number(r.amount)), 0);
+      if (expectedTotal !== creditTotal) throw new Error('Las sumas no coinciden al centavo.');
       rows.sort((a, b2) => String(a.covers_from).localeCompare(String(b2.covers_from)));
       const keep = rows[0]!;
-      const total = rows.reduce((a, r) => a + Number(r.amt), 0);
-      if (rows.length > 1) {
-        await c.query(`DELETE FROM pos_deposits WHERE id = ANY($1)`, [rows.slice(1).map((r) => r.id)]);
-        await c.query(
-          `UPDATE pos_deposits SET expected_amount = $2, covers_to = $3 WHERE id = $1`,
-          [keep.id, total, rows[rows.length - 1]!.covers_to],
+      const coversFrom = keep.covers_from;
+      const coversTo = rows[rows.length - 1]!.covers_to;
+      // One deposit row per bank credit (the schema links one credit to one
+      // window): the day-level expectations are replaced by credit-level rows
+      // covering the same range, each expecting exactly its credit's amount.
+      await c.query(`DELETE FROM pos_deposits WHERE id = ANY($1)`, [rows.map((r) => r.id)]);
+      let finalStatus = 'matched';
+      for (const cr of credits) {
+        const ins = await c.query(
+          `INSERT INTO pos_deposits (organization_id, location_id, deposit_type, covers_from, covers_to,
+                                     expected_amount, expected_on, status)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, 'expected') RETURNING id`,
+          [ctx.orgId, keep.location_id, keep.deposit_type, coversFrom, coversTo, cr.amount, cr.posted_at],
         );
+        const upd = await c.query(
+          `UPDATE pos_deposits SET bank_transaction_id = $2 WHERE id = $1 RETURNING status::text AS status`,
+          [ins.rows[0].id, cr.id],
+        );
+        if (upd.rows[0].status !== 'matched') finalStatus = upd.rows[0].status;
       }
-      const upd = await c.query(
-        `UPDATE pos_deposits SET bank_transaction_id = $2 WHERE id = $1
-         RETURNING status::text AS status, variance_amount::float8 AS variance`,
-        [keep.id, b.bankTransactionId],
-      );
       await c.query('COMMIT');
-      return { ok: true, status: upd.rows[0].status, variance: upd.rows[0].variance };
+      return { ok: true, status: finalStatus };
     } catch (err) {
       await c.query('ROLLBACK');
       return reply.code(409).send({ error: `El cruce fue rechazado: ${String((err as Error).message)}` });
