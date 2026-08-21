@@ -16,6 +16,9 @@ import { resolveCredentialsFor, syncPosIntegration } from './integrations/sync.j
 
 const POS_PROVIDERS = new Set(['clover', 'toast', 'square', 'lightspeed']);
 const BACKFILL_DAYS = Number(process.env.SYNC_BACKFILL_DAYS ?? 30);
+// Recent days are re-fetched even if already imported: providers post late
+// settles and corrections, and the upsert only rewrites when numbers changed.
+const REFRESH_DAYS = Number(process.env.SYNC_REFRESH_DAYS ?? 3);
 
 const dayInTz = (tz: string, daysAgo: number): string =>
   new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(new Date(Date.now() - daysAgo * 86_400_000));
@@ -93,7 +96,7 @@ export async function syncPosWindow(pool: pg.Pool, integrationId: string): Promi
   let imported = 0;
   for (let ago = 1; ago <= BACKFILL_DAYS; ago++) {
     const day = dayInTz(tz, ago);
-    if (have.has(day)) continue;
+    if (ago > REFRESH_DAYS && have.has(day)) continue;
     try {
       const res = await syncPosIntegration(pool, row.id, day);
       if (res.imported) imported++;

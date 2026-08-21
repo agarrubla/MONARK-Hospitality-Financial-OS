@@ -155,6 +155,35 @@ describe('POS sync (Clover-style normalized feed)', () => {
     expect(res.imported).toBe(false);
     expect(res.skipped).toBe(false);
   });
+
+  it('a provider correction updates the same row — never a second one', async () => {
+    const f = await createOrg();
+    const integration = await createIntegration(f.org, 'clover', f.loc1);
+    const day = (gross: number, discounts: number) => ({
+      businessDate: '2026-08-18',
+      grossSales: gross, discounts, comps: 0, taxCollected: 100, tips: 200,
+      tender: { cash: 0, card: gross - discounts + 300, gift_card: 0, other: discounts },
+      checkCount: 10, externalBatchId: 'clover-m1-2026-08-18',
+    });
+
+    // First import knew nothing about discounts…
+    await syncPosIntegration(pool, integration, '2026-08-18', {
+      adapter: makeSandboxPosAdapter({ '2026-08-18': day(1000, 0) }), credentials: {},
+    });
+    // …the provider later itemizes $50 of discounts (pre-discount gross rises).
+    const corrected = await syncPosIntegration(pool, integration, '2026-08-18', {
+      adapter: makeSandboxPosAdapter({ '2026-08-18': day(1050, 50) }), credentials: {},
+    });
+    expect(corrected.imported).toBe(true);
+
+    const rows = await pool.query(
+      `SELECT gross_sales::float8 AS g, discounts::float8 AS d, net_sales::float8 AS n
+         FROM pos_sales WHERE organization_id = $1 AND business_date = '2026-08-18'`,
+      [f.org],
+    );
+    expect(rows.rowCount).toBe(1); // one day, one row — corrected in place
+    expect(rows.rows[0]).toEqual({ g: 1050, d: 50, n: 1000 });
+  });
 });
 
 describe('adapter guardrails', () => {

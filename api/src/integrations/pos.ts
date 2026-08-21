@@ -37,6 +37,61 @@ interface CloverPayment {
   tender?: { labelKey?: string; label?: string };
 }
 
+interface CloverDiscount {
+  amount?: number; // cents (sign varies by client; use magnitude)
+  percentage?: number; // 0–100
+}
+interface CloverOrder {
+  id: string;
+  discounts?: { elements: CloverDiscount[] };
+  lineItems?: { elements: Array<{ price: number; discounts?: { elements: CloverDiscount[] } }> };
+}
+
+/**
+ * Discounts live on orders, not payments (payments report the post-discount
+ * charge). Fixed discounts count by magnitude; percentage ones apply to the
+ * line price (line level) or the discounted line subtotal (order level).
+ */
+async function cloverDiscountCents(
+  base: string,
+  token: string,
+  merchantId: string,
+  dayStart: number,
+  dayEnd: number,
+): Promise<number> {
+  let total = 0;
+  let offset = 0;
+  for (;;) {
+    const url =
+      `${base}/v3/merchants/${merchantId}/orders` +
+      `?filter=createdTime>=${dayStart}&filter=createdTime<${dayEnd}` +
+      `&expand=discounts,lineItems.discounts&limit=1000&offset=${offset}`;
+    const res = await fetchWithRetry(url, { headers: { authorization: `Bearer ${token}` } });
+    if (!res.ok) throw new Error(`clover orders ${res.status}: ${await res.text()}`);
+    const orders = ((await res.json()) as { elements: CloverOrder[] }).elements;
+    for (const o of orders) {
+      let lineSub = 0;
+      let lineDisc = 0;
+      for (const li of o.lineItems?.elements ?? []) {
+        lineSub += li.price;
+        for (const d of li.discounts?.elements ?? []) {
+          lineDisc += d.amount ? Math.abs(d.amount) : Math.round((li.price * (d.percentage ?? 0)) / 100);
+        }
+      }
+      let orderDisc = 0;
+      for (const d of o.discounts?.elements ?? []) {
+        orderDisc += d.amount
+          ? Math.abs(d.amount)
+          : Math.round(((lineSub - lineDisc) * (d.percentage ?? 0)) / 100);
+      }
+      total += lineDisc + orderDisc;
+    }
+    if (orders.length < 1000) break;
+    offset += 1000;
+  }
+  return total;
+}
+
 export const cloverAdapter: PosAdapter = {
   provider: 'clover',
   async fetchDay(creds, merchantId, businessDate): Promise<NormalizedPosDay | null> {
@@ -74,17 +129,28 @@ export const cloverAdapter: PosAdapter = {
       cents.tips += tip;
       cents.total += p.amount + tip;
     }
+    // Itemized discounts come from the orders of the same window. If Clover
+    // can't answer, degrade to 0 rather than losing the whole day.
+    let discountCents = 0;
+    try {
+      discountCents = await cloverDiscountCents(base, creds.api_token!, merchantId, dayStart, dayEnd);
+    } catch (err) {
+      console.error(`clover discounts ${businessDate}: ${(err as Error).message}`);
+    }
+
     const toUnits = (c: number) => Math.round(c) / 100;
-    // gross = tendered − tax − tips (tender must equal gross + tax + tips).
-    const gross = toUnits(cents.total - cents.tax - cents.tips);
+    // Schema convention: tender must sum to gross + tax + tips, where gross is
+    // PRE-discount — the discounted portion rides in the "other" bucket (same
+    // as the manual-entry path, which folds everything into "other").
+    const gross = toUnits(cents.total - cents.tax - cents.tips + discountCents);
     return {
       businessDate,
       grossSales: gross,
-      discounts: 0, // v1: Clover reports post-discount amounts; itemized discounts come with the orders expansion
+      discounts: toUnits(discountCents),
       comps: 0,
       taxCollected: toUnits(cents.tax),
       tips: toUnits(cents.tips),
-      tender: { cash: toUnits(cents.cash), card: toUnits(cents.card), gift_card: 0, other: toUnits(cents.other) },
+      tender: { cash: toUnits(cents.cash), card: toUnits(cents.card), gift_card: 0, other: toUnits(cents.other + discountCents) },
       checkCount: settled.length,
       externalBatchId: `clover-${merchantId}-${businessDate}-${tz}`,
     };
