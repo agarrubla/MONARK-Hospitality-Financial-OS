@@ -82,7 +82,7 @@ export default function LivePOSScreen() {
                     <Text style={{ ...fMono(600, 14), color: colors.text }}>{money(p.gross - p.discounts)}</Text>
                   </View>
                   <Text style={{ ...fSans(400, 10.5), color: colors.muted, marginTop: 3 }}>
-                    bruto {money(p.gross)} · desc. {money(p.discounts)} · imp. {money(p.tax)} · propinas {money(p.tips)}
+                    bruto {money(p.gross)} · desc. {money(p.discounts)} · imp. {money(p.tax)} · {p.source && p.source !== 'manual' ? 'prop.+serv.' : 'propinas'} {money(p.tips)}
                   </Text>
                 </View>
               ))}

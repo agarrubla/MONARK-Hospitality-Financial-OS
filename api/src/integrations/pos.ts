@@ -30,7 +30,8 @@ async function fetchWithRetry(url: string, init: RequestInit, tries = 5): Promis
 
 interface CloverPayment {
   id: string;
-  amount: number; // cents, includes tax
+  order?: { id: string };
+  amount: number; // cents, post-discount, includes tax and service charge
   tipAmount?: number; // cents
   taxAmount?: number; // cents
   result: string;
@@ -43,53 +44,79 @@ interface CloverDiscount {
 }
 interface CloverOrder {
   id: string;
+  serviceCharge?: { percentage?: number };
   discounts?: { elements: CloverDiscount[] };
-  lineItems?: { elements: Array<{ price: number; discounts?: { elements: CloverDiscount[] } }> };
+  lineItems?: {
+    elements: Array<{
+      price: number;
+      discounts?: { elements: CloverDiscount[] };
+      modifications?: { elements: Array<{ amount?: number }> };
+    }>;
+  };
 }
 
 /**
- * Discounts live on orders, not payments (payments report the post-discount
- * charge). Fixed discounts count by magnitude; percentage ones apply to the
- * line price (line level) or the discounted line subtotal (order level).
+ * Sales composition lives on orders, not payments (payments only report the
+ * post-discount charge). Per PAID order (validated to the cent against
+ * Clover's own sales report):
+ *   base       = Σ line price + modifications              → gross sales
+ *   discounts  = fixed by magnitude; % on (line+mods) at line level,
+ *                then % on (base − line discounts) at order level
+ *   gratuity   = paid − tax − (base − discounts)           → service charge,
+ *                exact residual, no percentage rounding drift
  */
-async function cloverDiscountCents(
+async function cloverOrderTotals(
   base: string,
   token: string,
   merchantId: string,
   dayStart: number,
   dayEnd: number,
-): Promise<number> {
-  let total = 0;
+  paidByOrder: Map<string, { paid: number; tax: number }>,
+): Promise<{ gross: number; discounts: number; gratuity: number }> {
+  const out = { gross: 0, discounts: 0, gratuity: 0 };
+  const matched = new Set<string>();
   let offset = 0;
   for (;;) {
     const url =
       `${base}/v3/merchants/${merchantId}/orders` +
       `?filter=createdTime>=${dayStart}&filter=createdTime<${dayEnd}` +
-      `&expand=discounts,lineItems.discounts&limit=1000&offset=${offset}`;
+      `&expand=serviceCharge,discounts,lineItems.discounts,lineItems.modifications&limit=1000&offset=${offset}`;
     const res = await fetchWithRetry(url, { headers: { authorization: `Bearer ${token}` } });
     if (!res.ok) throw new Error(`clover orders ${res.status}: ${await res.text()}`);
     const orders = ((await res.json()) as { elements: CloverOrder[] }).elements;
     for (const o of orders) {
-      let lineSub = 0;
+      const pay = paidByOrder.get(o.id);
+      if (!pay) continue; // unpaid/open order — not a sale (comped $0 orders DO carry a $0 payment)
+      matched.add(o.id);
+      let orderBase = 0;
       let lineDisc = 0;
       for (const li of o.lineItems?.elements ?? []) {
-        lineSub += li.price;
+        const mods = (li.modifications?.elements ?? []).reduce((a, m) => a + (m.amount ?? 0), 0);
+        orderBase += li.price + mods;
         for (const d of li.discounts?.elements ?? []) {
-          lineDisc += d.amount ? Math.abs(d.amount) : Math.round((li.price * (d.percentage ?? 0)) / 100);
+          lineDisc += d.amount ? Math.abs(d.amount) : Math.round(((li.price + mods) * (d.percentage ?? 0)) / 100);
         }
       }
       let orderDisc = 0;
       for (const d of o.discounts?.elements ?? []) {
         orderDisc += d.amount
           ? Math.abs(d.amount)
-          : Math.round(((lineSub - lineDisc) * (d.percentage ?? 0)) / 100);
+          : Math.round(((orderBase - lineDisc) * (d.percentage ?? 0)) / 100);
       }
-      total += lineDisc + orderDisc;
+      const net = orderBase - lineDisc - orderDisc;
+      out.gross += orderBase;
+      out.discounts += lineDisc + orderDisc;
+      out.gratuity += pay.paid - pay.tax - net;
     }
     if (orders.length < 1000) break;
     offset += 1000;
   }
-  return total;
+  // Payments whose order fell outside this window (opened before the cutoff,
+  // paid after): count their net as plain gross so the day still balances.
+  for (const [orderId, pay] of paidByOrder) {
+    if (!matched.has(orderId)) out.gross += pay.paid - pay.tax;
+  }
+  return out;
 }
 
 /** Epoch millis of `date` at `hour`:00 local time in `tz` (DST-safe). */
@@ -153,7 +180,8 @@ export const cloverAdapter: PosAdapter = {
     if (payments.length === 0) return null;
 
     const settled = payments.filter((p) => p.result === 'SUCCESS');
-    const cents = { cash: 0, card: 0, other: 0, tax: 0, tips: 0, total: 0 };
+    const cents = { cash: 0, card: 0, other: 0, tax: 0, tips: 0 };
+    const paidByOrder = new Map<string, { paid: number; tax: number }>();
     for (const p of settled) {
       const label = (p.tender?.labelKey ?? p.tender?.label ?? '').toLowerCase();
       const bucket = label.includes('cash') ? 'cash' : label.includes('credit') || label.includes('debit') || label.includes('card') ? 'card' : 'other';
@@ -161,30 +189,30 @@ export const cloverAdapter: PosAdapter = {
       cents[bucket] += p.amount + tip;
       cents.tax += p.taxAmount ?? 0;
       cents.tips += tip;
-      cents.total += p.amount + tip;
+      const orderId = p.order?.id ?? `pago-${p.id}`;
+      const entry = paidByOrder.get(orderId) ?? { paid: 0, tax: 0 };
+      entry.paid += p.amount;
+      entry.tax += p.taxAmount ?? 0;
+      paidByOrder.set(orderId, entry);
     }
-    // Itemized discounts come from the orders of the same window. If Clover
-    // can't answer, degrade to 0 rather than losing the whole day.
-    let discountCents = 0;
-    try {
-      discountCents = await cloverDiscountCents(base, creds.api_token!, merchantId, dayStart, dayEnd);
-    } catch (err) {
-      console.error(`clover discounts ${businessDate}: ${(err as Error).message}`);
-    }
+    // Sales composition (pre-discount gross, itemized discounts, service
+    // charge) comes from the paid orders of the same window. No degrading:
+    // gross depends on it, so a failure fails the day and retries next tick.
+    const totals = await cloverOrderTotals(base, creds.api_token!, merchantId, dayStart, dayEnd, paidByOrder);
 
     const toUnits = (c: number) => Math.round(c) / 100;
-    // Schema convention: tender must sum to gross + tax + tips, where gross is
-    // PRE-discount — the discounted portion rides in the "other" bucket (same
-    // as the manual-entry path, which folds everything into "other").
-    const gross = toUnits(cents.total - cents.tax - cents.tips + discountCents);
+    // Schema convention: tender must sum to gross + tax + tips. Gross is
+    // PRE-discount (the discounted portion rides in the "other" bucket, same
+    // as the manual-entry path) and the service charge counts with tips —
+    // both are staff money, and Clover's report separates them from sales.
     return {
       businessDate,
-      grossSales: gross,
-      discounts: toUnits(discountCents),
+      grossSales: toUnits(totals.gross),
+      discounts: toUnits(totals.discounts),
       comps: 0,
       taxCollected: toUnits(cents.tax),
-      tips: toUnits(cents.tips),
-      tender: { cash: toUnits(cents.cash), card: toUnits(cents.card), gift_card: 0, other: toUnits(cents.other + discountCents) },
+      tips: toUnits(cents.tips + totals.gratuity),
+      tender: { cash: toUnits(cents.cash), card: toUnits(cents.card), gift_card: 0, other: toUnits(cents.other + totals.discounts) },
       checkCount: settled.length,
       externalBatchId: `clover-${merchantId}-${businessDate}-${tz}`,
     };
