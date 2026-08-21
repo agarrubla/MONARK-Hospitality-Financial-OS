@@ -16,6 +16,7 @@ import React, { useState } from 'react';
 import { Platform, SafeAreaView, Text, useWindowDimensions, View } from 'react-native';
 import { ModuleDock } from './src/navigation/ModuleDock';
 import LiveBankingScreen from './src/screens/live/LiveBankingScreen';
+import LiveReconScreen from './src/screens/live/LiveReconScreen';
 import LiveAPScreen from './src/screens/live/LiveAPScreen';
 import LiveDashboardScreen from './src/screens/live/LiveDashboardScreen';
 import LivePOSScreen from './src/screens/live/LivePOSScreen';
@@ -26,13 +27,6 @@ import PlaceholderScreen from './src/screens/live/PlaceholderScreen';
 import { StoreProvider, useStore } from './src/store/store';
 import { colors } from './src/theme/tokens';
 
-const Recon = () => (
-  <PlaceholderScreen
-    title="RECONCILIATION" sub="Cruce pagos ↔ banco ↔ POS" icon="⇄"
-    blurb="El motor de conciliación cruza tus pagos y ventas contra los movimientos reales del banco y te avisa de cualquier diferencia."
-    activates="Requiere la conexión bancaria. Con banco conectado, cada pago que registres se confirma contra su débito real, y cada depósito de ventas contra su abono."
-  />
-);
 const AIModules = () => (
   <PlaceholderScreen
     title="AI · AUTOMATIZACIÓN" sub="OCR de facturas · email · clasificación" icon="◇"
@@ -55,7 +49,7 @@ const modules = [
   { key: 'treasury', label: 'PAGOS', icon: '⏷', Screen: LiveTreasuryScreen },
   { key: 'reports', label: 'REPORTES', icon: '◔', Screen: LiveReportsScreen },
   { key: 'banking', label: 'BANCO', icon: '≋', Screen: LiveBankingScreen },
-  { key: 'recon', label: 'CONCILIAR', icon: '⇄', Screen: Recon },
+  { key: 'recon', label: 'CONCILIAR', icon: '⇄', Screen: LiveReconScreen },
   { key: 'ai', label: 'AI', icon: '◇', Screen: AIModules },
   { key: 'intel', label: 'ALERTAS', icon: '◎', Screen: Insights },
   { key: 'config', label: 'AJUSTES', icon: '⚙', Screen: LiveSettingsScreen },

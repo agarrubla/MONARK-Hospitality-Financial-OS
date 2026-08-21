@@ -89,6 +89,33 @@ export interface BankIntegration {
   lastSyncAt: string | null;
 }
 
+export interface Deposit {
+  id: string;
+  locationId: string;
+  type: string; // 'card_batch' | 'cash_deposit'
+  coversFrom: string;
+  expectedAmount: number;
+  expectedOn: string;
+  actualAmount: number | null;
+  variance: number | null;
+  status: string; // 'expected' | 'matched' | 'variance' | 'missing'
+  bankTransactionId: string | null;
+  suggestion: { bankTransactionId: string; postedAt: string; amount: number } | null;
+}
+
+export interface MatchCandidate {
+  paymentId: string;
+  bankTransactionId: string;
+  amount: number;
+  paymentDate: string;
+  postedAt: string;
+  dateDistance: number;
+  candidateCount: number;
+  description: string;
+  vendorName: string | null;
+  invoiceNumber: string | null;
+}
+
 export interface PosIntegration {
   id: string;
   provider: string;
@@ -110,9 +137,11 @@ interface AppData {
   bankAccounts: BankAccount[];
   bankTxns: BankTxn[];
   bankIntegrations: BankIntegration[];
+  deposits: Deposit[];
+  matchCandidates: MatchCandidate[];
 }
 
-const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [] };
+const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [], deposits: [], matchCandidates: [] };
 
 export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
 export const todayISO = (): string => new Date().toISOString().slice(0, 10);
@@ -153,6 +182,8 @@ interface StoreApi {
   disconnectPos(id: string): Promise<void>;
   bankLinkToken(): Promise<string>;
   bankExchange(publicToken: string): Promise<void>;
+  confirmDeposit(depositId: string, bankTransactionId: string): Promise<void>;
+  confirmPaymentMatch(paymentId: string, bankTransactionId: string): Promise<void>;
 }
 
 const StoreContext = createContext<StoreApi | null>(null);
@@ -318,6 +349,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       bankExchange: (publicToken) =>
         run(async () => {
           await api('POST', '/bank/exchange', { publicToken });
+          await refresh();
+        }),
+      confirmDeposit: (depositId, bankTransactionId) =>
+        run(async () => {
+          await api('POST', '/reconcile/deposit', { depositId, bankTransactionId });
+          await refresh();
+        }),
+      confirmPaymentMatch: (paymentId, bankTransactionId) =>
+        run(async () => {
+          await api('POST', '/reconcile/payment', { paymentId, bankTransactionId });
           await refresh();
         }),
     }),

@@ -329,7 +329,111 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
         orgName: org?.name ?? '', locations, vendors, categories, invoices, posDays, payments,
         bankAccounts, bankTxns, bankIntegrations,
       };
+    }).then(async (state) => {
+      // Reconciliation data (service context with explicit org filters — the
+      // detector view has no app-role grants).
+      const deposits = (
+        await pool.query(
+          `SELECT d.id, d.location_id AS "locationId", d.deposit_type::text AS type,
+                  d.covers_from::text AS "coversFrom", d.expected_amount::float8 AS "expectedAmount",
+                  d.expected_on::text AS "expectedOn", d.actual_amount::float8 AS "actualAmount",
+                  d.variance_amount::float8 AS variance, d.status::text AS status,
+                  d.bank_transaction_id AS "bankTransactionId"
+             FROM pos_deposits d WHERE d.organization_id = $1
+            ORDER BY d.expected_on DESC, d.deposit_type LIMIT 120`,
+          [ctx.orgId],
+        )
+      ).rows;
+      // Single exact-amount bank credit near the expected date → suggestion.
+      const suggestions = (
+        await pool.query(
+          `SELECT d.id AS "depositId", bt.id AS "bankTransactionId",
+                  bt.posted_at::text AS "postedAt", bt.amount::float8 AS amount,
+                  count(*) OVER (PARTITION BY d.id) AS n
+             FROM pos_deposits d
+             JOIN bank_accounts ba ON ba.organization_id = d.organization_id
+             JOIN bank_transactions bt ON bt.bank_account_id = ba.id
+            WHERE d.organization_id = $1 AND d.status = 'expected'
+              AND bt.match_status = 'unmatched' AND bt.amount = d.expected_amount
+              AND abs(bt.posted_at - d.expected_on) <= 4`,
+          [ctx.orgId],
+        )
+      ).rows.filter((s) => Number(s.n) === 1);
+      const matchCandidates = (
+        await pool.query(
+          `SELECT c.payment_id AS "paymentId", c.bank_transaction_id AS "bankTransactionId",
+                  c.debit_amount::float8 AS amount, c.payment_date::text AS "paymentDate",
+                  c.posted_at::text AS "postedAt", c.date_distance_days AS "dateDistance",
+                  c.candidate_count AS "candidateCount", bt.description_raw AS description,
+                  v.name AS "vendorName", i.invoice_number AS "invoiceNumber"
+             FROM v_payment_match_candidates c
+             JOIN bank_transactions bt ON bt.id = c.bank_transaction_id
+             LEFT JOIN payment_matches pm ON pm.payment_id = c.payment_id AND pm.bank_transaction_id IS NULL
+             LEFT JOIN invoices i ON i.id = pm.invoice_id
+             LEFT JOIN vendors v ON v.id = i.vendor_id
+            WHERE c.organization_id = $1
+            ORDER BY c.posted_at DESC LIMIT 60`,
+          [ctx.orgId],
+        )
+      ).rows;
+      const suggestionByDeposit = new Map(suggestions.map((s) => [s.depositId, s]));
+      return {
+        ...state,
+        deposits: deposits.map((d) => ({ ...d, suggestion: suggestionByDeposit.get(d.id) ?? null })),
+        matchCandidates,
+      };
     });
+  });
+
+  /* ── Conciliación ──────────────────────────────────────────────────────── */
+
+  app.post('/reconcile/deposit', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const b = req.body as { depositId?: string; bankTransactionId?: string };
+    if (!b.depositId || !b.bankTransactionId) return reply.code(400).send({ error: 'Faltan datos del cruce.' });
+    try {
+      const upd = await pool.query(
+        `UPDATE pos_deposits SET bank_transaction_id = $2
+          WHERE id = $1 AND organization_id = $3
+          RETURNING status::text AS status, variance_amount::float8 AS variance`,
+        [b.depositId, b.bankTransactionId, ctx.orgId],
+      );
+      if (!upd.rowCount) return reply.code(404).send({ error: 'Depósito no encontrado.' });
+      return { ok: true, status: upd.rows[0].status, variance: upd.rows[0].variance };
+    } catch (err) {
+      return reply.code(409).send({ error: `El cruce fue rechazado: ${String((err as Error).message)}` });
+    }
+  });
+
+  app.post('/reconcile/payment', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const b = req.body as { paymentId?: string; bankTransactionId?: string };
+    if (!b.paymentId || !b.bankTransactionId) return reply.code(400).send({ error: 'Faltan datos del cruce.' });
+    const owned = (
+      await pool.query(`SELECT posted_at FROM v_payment_match_candidates
+                         WHERE organization_id = $1 AND payment_id = $2 AND bank_transaction_id = $3`,
+        [ctx.orgId, b.paymentId, b.bankTransactionId])
+    ).rows[0];
+    if (!owned) return reply.code(404).send({ error: 'Ese cruce ya no está disponible.' });
+    const link = await pool.query(
+      `UPDATE payment_matches SET bank_transaction_id = $1
+        WHERE id = (SELECT id FROM payment_matches WHERE payment_id = $2 AND bank_transaction_id IS NULL LIMIT 1)
+        RETURNING id`,
+      [b.bankTransactionId, b.paymentId],
+    );
+    if (!link.rowCount) return reply.code(409).send({ error: 'El pago ya estaba conciliado.' });
+    try {
+      await pool.query(
+        `UPDATE payments SET payment_date = $2, status = 'settled'
+          WHERE id = $1 AND status IN ('scheduled', 'processing')`,
+        [b.paymentId, owned.posted_at],
+      );
+    } catch {
+      // gates said no — the evidence link still stands
+    }
+    return { ok: true };
   });
 
   /* ── Mutations ─────────────────────────────────────────────────────────── */
