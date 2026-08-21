@@ -10,10 +10,12 @@ import { useStore } from '../../store/store';
 import { colors, fSans } from '../../theme/tokens';
 
 const SUGERENCIAS = [
+  '¿Cuánto fue la venta del fin de semana?',
+  '¿Cuánto vendimos esta semana?',
+  '¿Cuánto se pagó a proveedores?',
+  '¿Cuánto fueron los impuestos?',
+  '¿Cuánto se recogió en propinas?',
   '¿Cómo va el mes?',
-  '¿Cuánto le debo a proveedores?',
-  '¿Cuál fue mi mejor día de ventas?',
-  '¿Qué alertas tengo abiertas?',
 ];
 
 interface Turn { q: string; a: string }

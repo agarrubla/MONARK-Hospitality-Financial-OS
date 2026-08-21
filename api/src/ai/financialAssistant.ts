@@ -10,7 +10,7 @@ import type pg from 'pg';
 import { resolveCredentials } from '../integrations/sync.js';
 
 export async function buildFinancialSnapshot(pool: pg.Pool, orgId: string): Promise<object> {
-  const [org, pl, cash, openAp, sales, deposits, insights, banks, vendors] = await Promise.all([
+  const [org, pl, cash, openAp, sales, deposits, insights, banks, vendors, recentPayments] = await Promise.all([
     pool.query(`SELECT name FROM organizations WHERE id = $1`, [orgId]),
     pool.query(
       `SELECT v.expense_month::text AS mes, coalesce(ec.name, '(sin categoría)') AS categoria,
@@ -48,6 +48,15 @@ export async function buildFinancialSnapshot(pool: pg.Pool, orgId: string): Prom
          FROM invoices i JOIN vendors v ON v.id = i.vendor_id
         WHERE i.organization_id = $1 AND i.status <> 'void'
         GROUP BY v.name ORDER BY sum(i.total) DESC LIMIT 15`, [orgId]),
+    pool.query(
+      `SELECT p.payment_date::text AS fecha, p.amount::float8 AS monto, p.method::text AS metodo,
+              v.name AS proveedor, i.invoice_number AS factura
+         FROM payments p
+         JOIN payment_matches pm ON pm.payment_id = p.id
+         JOIN invoices i ON i.id = pm.invoice_id
+         JOIN vendors v ON v.id = i.vendor_id
+        WHERE p.organization_id = $1 AND p.status = 'settled'
+        ORDER BY p.payment_date DESC LIMIT 60`, [orgId]),
   ]);
   const revenue = await pool.query(
     `SELECT to_char(date_trunc('month', business_date), 'YYYY-MM') AS mes,
@@ -65,6 +74,7 @@ export async function buildFinancialSnapshot(pool: pg.Pool, orgId: string): Prom
     alertas_abiertas: insights.rows,
     cuentas_bancarias: banks.rows,
     proveedores_top: vendors.rows,
+    pagos_a_proveedores_recientes: recentPayments.rows,
   };
 }
 
