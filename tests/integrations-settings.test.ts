@@ -113,6 +113,18 @@ describe('POS settings', () => {
     expect(secrets.rowCount).toBe(0);
   });
 
+  it('bank link-token fails in Spanish while Plaid platform keys are missing', async () => {
+    const saved = process.env.MONARK_VAULT;
+    delete process.env.MONARK_VAULT;
+    try {
+      const res = await call('POST', '/bank/link-token', {});
+      expect(res.statusCode).toBe(400);
+      expect(res.json().error).toContain('conexión bancaria');
+    } finally {
+      if (saved !== undefined) process.env.MONARK_VAULT = saved;
+    }
+  });
+
   it('refuses a location from another organization', async () => {
     const other = await app.inject({
       method: 'POST', url: '/auth/register',

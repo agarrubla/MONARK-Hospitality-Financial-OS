@@ -61,6 +61,34 @@ export const posNet = (p: PosDay): number => p.gross - p.discounts - (p.comps ??
 /** Money that actually entered that day: net + taxes + tips/service. */
 export const posCollected = (p: PosDay): number => posNet(p) + p.tax + p.tips;
 
+export interface BankAccount {
+  id: string;
+  institution: string;
+  name: string;
+  mask: string;
+  type: string;
+  balance: number;
+  balanceAsOf: string | null;
+}
+
+export interface BankTxn {
+  id: string;
+  accountId: string;
+  date: string;
+  amount: number; // negative = money out
+  description: string;
+  counterparty?: string | null;
+  pending: boolean;
+  matched: boolean;
+}
+
+export interface BankIntegration {
+  id: string;
+  provider: string;
+  status: string;
+  lastSyncAt: string | null;
+}
+
 export interface PosIntegration {
   id: string;
   provider: string;
@@ -79,9 +107,12 @@ interface AppData {
   payments: Payment[];
   posDays: PosDay[];
   integrations: PosIntegration[];
+  bankAccounts: BankAccount[];
+  bankTxns: BankTxn[];
+  bankIntegrations: BankIntegration[];
 }
 
-const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [] };
+const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [] };
 
 export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
 export const todayISO = (): string => new Date().toISOString().slice(0, 10);
@@ -120,6 +151,8 @@ interface StoreApi {
     timezone?: string; dayCutoffHour?: number;
   }): Promise<void>;
   disconnectPos(id: string): Promise<void>;
+  bankLinkToken(): Promise<string>;
+  bankExchange(publicToken: string): Promise<void>;
 }
 
 const StoreContext = createContext<StoreApi | null>(null);
@@ -276,6 +309,15 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       disconnectPos: (id) =>
         run(async () => {
           await api('POST', `/integrations/${id}/disconnect`, {});
+          await refresh();
+        }),
+      bankLinkToken: async () => {
+        const res = await api<{ linkToken: string }>('POST', '/bank/link-token', {});
+        return res.linkToken;
+      },
+      bankExchange: (publicToken) =>
+        run(async () => {
+          await api('POST', '/bank/exchange', { publicToken });
           await refresh();
         }),
     }),

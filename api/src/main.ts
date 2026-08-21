@@ -4,6 +4,7 @@
  */
 import pg from 'pg';
 import { pgConfig, runMigrations } from '../../scripts/migrate.js';
+import { syncBankIntegration } from './integrations/sync.js';
 import { buildProductApp } from './app.js';
 import { startScheduler, syncPosWindow } from './scheduler.js';
 
@@ -14,6 +15,9 @@ async function main() {
   const app = buildProductApp(pool, {
     syncAfterConnect: (integrationId) => {
       void syncPosWindow(pool, integrationId).catch((err) => console.error('post-connect sync:', err));
+    },
+    syncBankAfterConnect: (integrationId) => {
+      void syncBankIntegration(pool, integrationId).catch((err) => console.error('post-connect bank sync:', err));
     },
   });
 

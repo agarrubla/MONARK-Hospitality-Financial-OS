@@ -16,6 +16,7 @@ import cors from '@fastify/cors';
 import Fastify, { type FastifyInstance, type FastifyReply, type FastifyRequest } from 'fastify';
 import { createHash, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
 import type pg from 'pg';
+import { resolveCredentials } from './integrations/sync.js';
 import { saveSecret } from './secrets.js';
 
 /* ── Passwords (scrypt, per-user salt) ───────────────────────────────────── */
@@ -95,7 +96,20 @@ export interface ProductAppOptions {
   verifyPos?: typeof defaultVerifyPos;
   /** Kick a backfill right after a POS connects (off in tests). */
   syncAfterConnect?: (integrationId: string) => void;
+  /** Kick a first bank sync right after a bank connects (off in tests). */
+  syncBankAfterConnect?: (integrationId: string) => void;
 }
+
+/* ── Plaid platform keys (MONARK's own, from the env vault) ──────────────── */
+
+const plaidPlatform = (): Record<string, string> | null => {
+  try {
+    return resolveCredentials('plaid-platform');
+  } catch {
+    return null;
+  }
+};
+const plaidBase = (env?: string): string => `https://${env ?? 'sandbox'}.plaid.com`;
 
 export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): FastifyInstance {
   const app = Fastify();
@@ -285,7 +299,36 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
             WHERE p.status = 'settled' ORDER BY p.payment_date DESC`,
         )
       ).rows;
-      return { orgName: org?.name ?? '', locations, vendors, categories, invoices, posDays, payments };
+      const bankAccounts = (
+        await c.query(
+          `SELECT id, institution_name AS institution, account_name AS name, account_mask AS mask,
+                  account_type::text AS type, current_balance::float8 AS balance,
+                  balance_as_of::text AS "balanceAsOf"
+             FROM bank_accounts WHERE status = 'active' AND integration_id IS NOT NULL
+            ORDER BY created_at`,
+        )
+      ).rows;
+      const bankTxns = (
+        await c.query(
+          `SELECT bt.id, bt.bank_account_id AS "accountId", bt.posted_at::text AS date,
+                  bt.amount::float8 AS amount, bt.description_raw AS description,
+                  bt.counterparty, bt.is_pending AS pending,
+                  (EXISTS (SELECT 1 FROM payment_matches pm WHERE pm.bank_transaction_id = bt.id)) AS matched
+             FROM bank_transactions bt JOIN bank_accounts ba ON ba.id = bt.bank_account_id
+            WHERE ba.integration_id IS NOT NULL
+            ORDER BY bt.posted_at DESC, bt.id DESC LIMIT 200`,
+        )
+      ).rows;
+      const bankIntegrations = (
+        await c.query(
+          `SELECT id, provider::text AS provider, status::text AS status, last_sync_at::text AS "lastSyncAt"
+             FROM integrations WHERE provider::text IN ('plaid', 'belvo') ORDER BY created_at`,
+        )
+      ).rows;
+      return {
+        orgName: org?.name ?? '', locations, vendors, categories, invoices, posDays, payments,
+        bankAccounts, bankTxns, bankIntegrations,
+      };
     });
   });
 
@@ -508,6 +551,81 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
     ).rows[0];
     opts.syncAfterConnect?.(row.id);
     return { ok: true, id: row.id, merchantName: check.name ?? null };
+  });
+
+  /* ── Banco (Plaid Link) ────────────────────────────────────────────────── */
+
+  app.post('/bank/link-token', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const plat = plaidPlatform();
+    if (!plat) return reply.code(400).send({ error: 'La conexión bancaria aún no está configurada en el servidor.' });
+    let res: Response;
+    try {
+      res = await fetch(`${plaidBase(plat.env)}/link/token/create`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          client_id: plat.client_id,
+          secret: plat.secret,
+          user: { client_user_id: ctx.userId },
+          client_name: 'MONARK',
+          products: ['transactions'],
+          country_codes: ['US'],
+          language: 'es',
+        }),
+      });
+    } catch {
+      return reply.code(502).send({ error: 'No se pudo contactar a Plaid — intenta de nuevo.' });
+    }
+    const json = (await res.json()) as { link_token?: string; error_message?: string };
+    if (!res.ok || !json.link_token) {
+      return reply.code(502).send({ error: `Plaid: ${json.error_message ?? `error ${res.status}`}` });
+    }
+    return { linkToken: json.link_token };
+  });
+
+  app.post('/bank/exchange', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const { publicToken } = req.body as { publicToken?: string };
+    if (!publicToken) return reply.code(400).send({ error: 'Falta el token de conexión del banco.' });
+    const plat = plaidPlatform();
+    if (!plat) return reply.code(400).send({ error: 'La conexión bancaria aún no está configurada en el servidor.' });
+    let res: Response;
+    try {
+      res = await fetch(`${plaidBase(plat.env)}/item/public_token/exchange`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ client_id: plat.client_id, secret: plat.secret, public_token: publicToken }),
+      });
+    } catch {
+      return reply.code(502).send({ error: 'No se pudo contactar a Plaid — intenta de nuevo.' });
+    }
+    const json = (await res.json()) as { access_token?: string; item_id?: string; error_message?: string };
+    if (!res.ok || !json.access_token || !json.item_id) {
+      return reply.code(502).send({ error: `Plaid: ${json.error_message ?? `error ${res.status}`}` });
+    }
+    // The bank access token is per-connection and lives encrypted, like POS tokens.
+    const ref = `db:${ctx.orgId}:plaid:${json.item_id}`;
+    await saveSecret(pool, ref, ctx.orgId, {
+      client_id: plat.client_id!,
+      secret: plat.secret!,
+      access_token: json.access_token,
+      env: plat.env ?? 'sandbox',
+    });
+    const row = (
+      await pool.query(
+        `INSERT INTO integrations (organization_id, provider, external_ref, credentials_ref, scopes, status)
+         VALUES ($1, 'plaid', $2, $3, $4::jsonb, 'connected')
+         ON CONFLICT (organization_id, provider, external_ref)
+         DO UPDATE SET credentials_ref = EXCLUDED.credentials_ref, status = 'connected'
+         RETURNING id`,
+        [ctx.orgId, json.item_id, ref, JSON.stringify(['transactions.read'])],
+      )
+    ).rows[0];
+    opts.syncBankAfterConnect?.(row.id);
+    return { ok: true };
   });
 
   app.post('/integrations/:id/disconnect', async (req, reply) => {

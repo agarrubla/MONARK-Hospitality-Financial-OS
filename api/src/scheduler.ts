@@ -13,7 +13,7 @@
  */
 import pg from 'pg';
 import { dayCutoffHour } from './integrations/pos.js';
-import { resolveCredentialsFor, syncPosIntegration } from './integrations/sync.js';
+import { resolveCredentialsFor, syncBankIntegration, syncPosIntegration } from './integrations/sync.js';
 
 const POS_PROVIDERS = new Set(['clover', 'toast', 'square', 'lightspeed']);
 const BACKFILL_DAYS = Number(process.env.SYNC_BACKFILL_DAYS ?? 30);
@@ -135,12 +135,32 @@ async function syncPosAll(pool: pg.Pool): Promise<void> {
   }
 }
 
+async function syncBankAll(pool: pg.Pool): Promise<void> {
+  const rows = (
+    await pool.query(
+      `SELECT id, provider FROM integrations
+        WHERE provider::text IN ('plaid', 'belvo') AND status IN ('connected', 'error')`,
+    )
+  ).rows;
+  for (const row of rows) {
+    try {
+      const stats = await syncBankIntegration(pool, row.id);
+      if (stats.txnsInserted || stats.autoMatched) {
+        console.log(`sync ${row.provider}: ${stats.txnsInserted} txns, ${stats.autoMatched} auto-matched`);
+      }
+    } catch (err) {
+      console.error(`sync ${row.provider} ${row.id}: ${(err as Error).message}`);
+    }
+  }
+}
+
 export function startScheduler(pool: pg.Pool): void {
   const hours = Number(process.env.SYNC_INTERVAL_HOURS ?? 6);
   const tick = async () => {
     try {
       await attachConfigured(pool);
       await syncPosAll(pool);
+      await syncBankAll(pool);
     } catch (err) {
       console.error('scheduler tick failed:', err);
     }

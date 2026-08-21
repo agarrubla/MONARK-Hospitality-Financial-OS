@@ -15,6 +15,7 @@ import { StatusBar } from 'expo-status-bar';
 import React, { useState } from 'react';
 import { Platform, SafeAreaView, Text, useWindowDimensions, View } from 'react-native';
 import { ModuleDock } from './src/navigation/ModuleDock';
+import LiveBankingScreen from './src/screens/live/LiveBankingScreen';
 import LiveAPScreen from './src/screens/live/LiveAPScreen';
 import LiveDashboardScreen from './src/screens/live/LiveDashboardScreen';
 import LivePOSScreen from './src/screens/live/LivePOSScreen';
@@ -25,13 +26,6 @@ import PlaceholderScreen from './src/screens/live/PlaceholderScreen';
 import { StoreProvider, useStore } from './src/store/store';
 import { colors } from './src/theme/tokens';
 
-const Banking = () => (
-  <PlaceholderScreen
-    title="BANKING" sub="Cuentas y movimientos bancarios" icon="≋"
-    blurb="Aquí verás tus cuentas, saldos y cada movimiento del banco, conciliados contra tus pagos y depósitos."
-    activates="Conectar tus cuentas bancarias (Plaid para EE.UU., Belvo para Latinoamérica). Los movimientos entran solos cada mañana y se cruzan con lo que registraste — el banco es evidencia, nunca un gasto nuevo."
-  />
-);
 const Recon = () => (
   <PlaceholderScreen
     title="RECONCILIATION" sub="Cruce pagos ↔ banco ↔ POS" icon="⇄"
@@ -60,7 +54,7 @@ const modules = [
   { key: 'ap', label: 'FACTURAS', icon: '▤', Screen: LiveAPScreen },
   { key: 'treasury', label: 'PAGOS', icon: '⏷', Screen: LiveTreasuryScreen },
   { key: 'reports', label: 'REPORTES', icon: '◔', Screen: LiveReportsScreen },
-  { key: 'banking', label: 'BANCO', icon: '≋', Screen: Banking },
+  { key: 'banking', label: 'BANCO', icon: '≋', Screen: LiveBankingScreen },
   { key: 'recon', label: 'CONCILIAR', icon: '⇄', Screen: Recon },
   { key: 'ai', label: 'AI', icon: '◇', Screen: AIModules },
   { key: 'intel', label: 'ALERTAS', icon: '◎', Screen: Insights },
