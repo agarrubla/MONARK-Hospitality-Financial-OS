@@ -7,7 +7,7 @@ import { ScrollView, Text, View } from 'react-native';
 import {
   card, ChoiceChips, EmptyState, Field, Header, PrimaryButton, SectionLabel,
 } from '../../components/ui';
-import { money, monthLabel, monthOf, todayISO, useStore } from '../../store/store';
+import { money, monthLabel, monthOf, posCollected, posNet, todayISO, useStore } from '../../store/store';
 import { colors, fMono, fSans } from '../../theme/tokens';
 
 const num = (s: string): number => {
@@ -79,10 +79,13 @@ export default function LivePOSScreen() {
                         <Text style={{ ...fSans(600, 8.5, 0.08), color: colors.green }}>{p.source.toUpperCase()}</Text>
                       </View>
                     )}
-                    <Text style={{ ...fMono(600, 14), color: colors.text }}>{money(p.gross - p.discounts)}</Text>
+                    <Text style={{ ...fMono(600, 14), color: colors.text }}>{money(posNet(p))}</Text>
                   </View>
                   <Text style={{ ...fSans(400, 10.5), color: colors.muted, marginTop: 3 }}>
-                    bruto {money(p.gross)} · desc. {money(p.discounts)} · imp. {money(p.tax)} · {p.source && p.source !== 'manual' ? 'prop.+serv.' : 'propinas'} {money(p.tips)}
+                    bruto {money(p.gross)} · desc. {money(p.discounts)}{(p.refunds ?? 0) > 0 ? ` · reemb. ${money(p.refunds ?? 0)}` : ''} · imp. {money(p.tax)} · {p.source && p.source !== 'manual' ? 'prop.+serv.' : 'propinas'} {money(p.tips)}
+                  </Text>
+                  <Text style={{ ...fSans(500, 10.5), color: colors.textSecondary2, marginTop: 2 }}>
+                    recaudado {money(posCollected(p))}
                   </Text>
                 </View>
               ))}

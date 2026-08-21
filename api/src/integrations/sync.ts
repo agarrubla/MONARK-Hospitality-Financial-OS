@@ -171,30 +171,33 @@ export async function syncPosIntegration(
   }
 
   const source = POS_SOURCE[intRow.provider] ?? 'manual';
-  const net = day.grossSales - day.discounts - day.comps;
+  const refunds = day.refunds ?? 0;
+  const net = day.grossSales - day.discounts - day.comps - refunds;
   // One POS day per location per source. A replay with identical numbers is a
   // no-op; a replay with DIFFERENT numbers is a provider-side correction
   // (late settles, itemized discounts) and updates the same row — never a
   // second row, so the one-day-one-row invariant holds.
   const ins = await pool.query(
     `INSERT INTO pos_sales (organization_id, location_id, business_date, source, gross_sales,
-                            discounts, comps, net_sales, tax_collected, tips, tender_breakdown,
+                            discounts, comps, refunds, net_sales, tax_collected, tips, tender_breakdown,
                             check_count, external_batch_id)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      ON CONFLICT (location_id, business_date, source) DO UPDATE
        SET gross_sales = EXCLUDED.gross_sales, discounts = EXCLUDED.discounts,
-           comps = EXCLUDED.comps, net_sales = EXCLUDED.net_sales,
+           comps = EXCLUDED.comps, refunds = EXCLUDED.refunds, net_sales = EXCLUDED.net_sales,
            tax_collected = EXCLUDED.tax_collected, tips = EXCLUDED.tips,
            tender_breakdown = EXCLUDED.tender_breakdown, check_count = EXCLUDED.check_count
-     WHERE (pos_sales.gross_sales, pos_sales.discounts, pos_sales.comps, pos_sales.net_sales,
-            pos_sales.tax_collected, pos_sales.tips, pos_sales.tender_breakdown, pos_sales.check_count)
+     WHERE (pos_sales.gross_sales, pos_sales.discounts, pos_sales.comps, pos_sales.refunds,
+            pos_sales.net_sales, pos_sales.tax_collected, pos_sales.tips, pos_sales.tender_breakdown,
+            pos_sales.check_count)
            IS DISTINCT FROM
-           (EXCLUDED.gross_sales, EXCLUDED.discounts, EXCLUDED.comps, EXCLUDED.net_sales,
-            EXCLUDED.tax_collected, EXCLUDED.tips, EXCLUDED.tender_breakdown, EXCLUDED.check_count)
+           (EXCLUDED.gross_sales, EXCLUDED.discounts, EXCLUDED.comps, EXCLUDED.refunds,
+            EXCLUDED.net_sales, EXCLUDED.tax_collected, EXCLUDED.tips, EXCLUDED.tender_breakdown,
+            EXCLUDED.check_count)
      RETURNING id`,
     [
       intRow.organization_id, intRow.location_id, day.businessDate, source, day.grossSales,
-      day.discounts, day.comps, net, day.taxCollected, day.tips, JSON.stringify(day.tender),
+      day.discounts, day.comps, refunds, net, day.taxCollected, day.tips, JSON.stringify(day.tender),
       day.checkCount, day.externalBatchId ?? null,
     ],
   );

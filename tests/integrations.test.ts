@@ -209,6 +209,30 @@ describe('business-day window (7pm-to-close hospitality days)', () => {
     expect(zonedEpoch('America/New_York', '2026-01-10', 6)).toBe(Date.parse('2026-01-10T11:00:00Z'));
   });
 
+  it('refunds reduce net sales (net = gross − discounts − comps − refunds)', async () => {
+    const f = await createOrg();
+    const integration = await createIntegration(f.org, 'clover', f.loc1);
+    await syncPosIntegration(pool, integration, '2026-08-21', {
+      adapter: makeSandboxPosAdapter({
+        '2026-08-21': {
+          businessDate: '2026-08-21',
+          grossSales: 1000, discounts: 100, comps: 0, refunds: 19, taxCollected: 70, tips: 50,
+          tender: { cash: 0, card: 1020, gift_card: 0, other: 100 }, // = gross + tax + tips
+          checkCount: 8, externalBatchId: 'clover-m1-2026-08-21',
+        },
+      }),
+      credentials: {},
+    });
+    const row = (
+      await pool.query(
+        `SELECT net_sales::float8 AS n, refunds::float8 AS r FROM pos_sales
+          WHERE organization_id = $1 AND business_date = '2026-08-21'`,
+        [f.org],
+      )
+    ).rows[0];
+    expect(row).toEqual({ n: 881, r: 19 });
+  });
+
   it('a re-check that finds no sales removes the stale provider row', async () => {
     const f = await createOrg();
     const integration = await createIntegration(f.org, 'clover', f.loc1);

@@ -45,6 +45,7 @@ export interface NormalizedPosDay {
   grossSales: number;
   discounts: number;
   comps: number;
+  refunds?: number; // net of tax (Clover convention); refunded tax reduces taxCollected
   taxCollected: number;
   tips: number;
   tender: { cash: number; card: number; gift_card: number; other: number };

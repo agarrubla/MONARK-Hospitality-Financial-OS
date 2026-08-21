@@ -48,10 +48,18 @@ export interface PosDay {
   date: string;
   gross: number;
   discounts: number;
+  comps?: number;
+  refunds?: number;
   tax: number;
   tips: number;
   source?: string; // 'manual' | 'clover' | 'toast' | 'square' | 'lightspeed'
 }
+
+/** Net sales of a POS day: gross − discounts − comps − refunds. */
+export const posNet = (p: PosDay): number => p.gross - p.discounts - (p.comps ?? 0) - (p.refunds ?? 0);
+
+/** Money that actually entered that day: net + taxes + tips/service. */
+export const posCollected = (p: PosDay): number => posNet(p) + p.tax + p.tips;
 
 export interface PosIntegration {
   id: string;
@@ -311,7 +319,7 @@ export function revenueByMonth(d: AppData): Map<string, number> {
   const out = new Map<string, number>();
   for (const p of d.posDays) {
     const m = monthOf(p.date);
-    out.set(m, (out.get(m) ?? 0) + (p.gross - p.discounts));
+    out.set(m, (out.get(m) ?? 0) + posNet(p));
   }
   return out;
 }

@@ -7,7 +7,7 @@ import { ScrollView, Text, View } from 'react-native';
 import { card, EmptyState, Field, Header, PrimaryButton, SectionLabel } from '../../components/ui';
 import {
   cashOutByMonth, expensesByMonth, invoiceTotal, money, monthLabel, monthOf,
-  openAP, revenueByMonth, todayISO, useStore,
+  openAP, posNet, revenueByMonth, todayISO, useStore,
 } from '../../store/store';
 import { colors, fMono, fSans } from '../../theme/tokens';
 
@@ -61,7 +61,7 @@ export default function LiveDashboardScreen() {
   const open = openAP(data);
   const openTotal = open.reduce((a, i) => a + invoiceTotal(i), 0);
   const pending = data.invoices.filter((i) => i.status === 'pending_approval').length;
-  const todaySales = data.posDays.filter((p) => p.date === today).reduce((a, p) => a + (p.gross - p.discounts), 0);
+  const todaySales = data.posDays.filter((p) => p.date === today).reduce((a, p) => a + posNet(p), 0);
   const hasAnyData = data.invoices.length > 0 || data.posDays.length > 0;
 
   const stat = (label: string, val: string, sub: string, color?: string) => (

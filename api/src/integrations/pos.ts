@@ -200,19 +200,47 @@ export const cloverAdapter: PosAdapter = {
     // gross depends on it, so a failure fails the day and retries next tick.
     const totals = await cloverOrderTotals(base, creds.api_token!, merchantId, dayStart, dayEnd, paidByOrder);
 
+    // Refunds, Clover-report style: the refund counts net of tax, and the
+    // refunded tax comes OUT of the day's taxes.
+    let refundNet = 0;
+    let refundTax = 0;
+    {
+      let roffset = 0;
+      for (;;) {
+        const url =
+          `${base}/v3/merchants/${merchantId}/refunds` +
+          `?filter=createdTime>=${dayStart}&filter=createdTime<${dayEnd}&limit=1000&offset=${roffset}`;
+        const res = await fetchWithRetry(url, { headers: { authorization: `Bearer ${creds.api_token}` } });
+        if (!res.ok) throw new Error(`clover refunds ${res.status}: ${await res.text()}`);
+        const refunds = ((await res.json()) as {
+          elements: Array<{ amount?: number; taxAmount?: number; voided?: boolean; status?: string }>;
+        }).elements;
+        for (const r of refunds) {
+          if (r.voided || (r.status && r.status !== 'SUCCESS')) continue;
+          refundNet += (r.amount ?? 0) - (r.taxAmount ?? 0);
+          refundTax += r.taxAmount ?? 0;
+        }
+        if (refunds.length < 1000) break;
+        roffset += 1000;
+      }
+    }
+
     const toUnits = (c: number) => Math.round(c) / 100;
     // Schema convention: tender must sum to gross + tax + tips. Gross is
     // PRE-discount (the discounted portion rides in the "other" bucket, same
     // as the manual-entry path) and the service charge counts with tips —
     // both are staff money, and Clover's report separates them from sales.
+    // The refunded tax leaves both the taxes figure and the "other" bucket,
+    // keeping the tender identity exact in cents.
     return {
       businessDate,
       grossSales: toUnits(totals.gross),
       discounts: toUnits(totals.discounts),
       comps: 0,
-      taxCollected: toUnits(cents.tax),
+      refunds: toUnits(refundNet),
+      taxCollected: toUnits(cents.tax - refundTax),
       tips: toUnits(cents.tips + totals.gratuity),
-      tender: { cash: toUnits(cents.cash), card: toUnits(cents.card), gift_card: 0, other: toUnits(cents.other + totals.discounts) },
+      tender: { cash: toUnits(cents.cash), card: toUnits(cents.card), gift_card: 0, other: toUnits(cents.other + totals.discounts - refundTax) },
       checkCount: settled.length,
       externalBatchId: `clover-${merchantId}-${businessDate}-${tz}`,
     };

@@ -272,6 +272,7 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
         await c.query(
           `SELECT id, location_id AS "locationId", business_date::text AS date, source::text AS source,
                   gross_sales::float8 AS gross, discounts::float8 AS discounts,
+                  comps::float8 AS comps, refunds::float8 AS refunds,
                   tax_collected::float8 AS tax, tips::float8 AS tips
              FROM pos_sales ORDER BY business_date DESC`,
         )
