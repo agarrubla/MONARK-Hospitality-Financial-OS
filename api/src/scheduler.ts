@@ -12,6 +12,7 @@
  *      "credentialsRef": "clover-casa-d", "locationCode": "CASA-D" }]
  */
 import pg from 'pg';
+import { dayCutoffHour } from './integrations/pos.js';
 import { resolveCredentialsFor, syncPosIntegration } from './integrations/sync.js';
 
 const POS_PROVIDERS = new Set(['clover', 'toast', 'square', 'lightspeed']);
@@ -93,8 +94,14 @@ export async function syncPosWindow(pool: pg.Pool, integrationId: string): Promi
       )
     ).rows.map((r) => r.d as string),
   );
+  // Business day D runs until D+1 at the cutoff hour: before the cutoff,
+  // "yesterday" is still an open service night — never import an open day.
+  const hourNow = Number(
+    new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(new Date()),
+  );
+  const firstClosed = hourNow < dayCutoffHour(creds) ? 2 : 1;
   let imported = 0;
-  for (let ago = 1; ago <= BACKFILL_DAYS; ago++) {
+  for (let ago = firstClosed; ago <= BACKFILL_DAYS; ago++) {
     const day = dayInTz(tz, ago);
     if (ago > REFRESH_DAYS && have.has(day)) continue;
     try {

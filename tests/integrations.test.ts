@@ -199,3 +199,36 @@ describe('adapter guardrails', () => {
     ).rejects.toThrow(/missing credential/);
   });
 });
+
+describe('business-day window (7pm-to-close hospitality days)', () => {
+  it('computes tz-aware cutoff epochs (6am ET) correctly across the day boundary', async () => {
+    const { zonedEpoch } = await import('../api/src/integrations/pos.js');
+    // 2026-08-19 06:00 America/New_York is EDT (UTC-4) → 10:00Z
+    expect(zonedEpoch('America/New_York', '2026-08-19', 6)).toBe(Date.parse('2026-08-19T10:00:00Z'));
+    // Winter (EST, UTC-5): 2026-01-10 06:00 → 11:00Z
+    expect(zonedEpoch('America/New_York', '2026-01-10', 6)).toBe(Date.parse('2026-01-10T11:00:00Z'));
+  });
+
+  it('a re-check that finds no sales removes the stale provider row', async () => {
+    const f = await createOrg();
+    const integration = await createIntegration(f.org, 'clover', f.loc1);
+    const day = {
+      businessDate: '2026-08-19',
+      grossSales: 500, discounts: 0, comps: 0, taxCollected: 40, tips: 60,
+      tender: { cash: 0, card: 600, gift_card: 0, other: 0 },
+      checkCount: 5, externalBatchId: 'clover-m1-2026-08-19',
+    };
+    await syncPosIntegration(pool, integration, '2026-08-19', {
+      adapter: makeSandboxPosAdapter({ '2026-08-19': day }), credentials: {},
+    });
+    // Window redefinition moved those sales to the previous night → day is now empty.
+    await syncPosIntegration(pool, integration, '2026-08-19', {
+      adapter: makeSandboxPosAdapter({}), credentials: {},
+    });
+    const rows = await pool.query(
+      `SELECT 1 FROM pos_sales WHERE organization_id = $1 AND business_date = '2026-08-19'`,
+      [f.org],
+    );
+    expect(rows.rowCount).toBe(0);
+  });
+});

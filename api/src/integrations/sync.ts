@@ -157,7 +157,18 @@ export async function syncPosIntegration(
   const creds = opts.credentials ?? (await resolveCredentialsFor(pool, intRow.credentials_ref));
 
   const day = await adapter.fetchDay(creds, intRow.external_ref, businessDate);
-  if (!day) return { imported: false, skipped: false, depositsExpected: 0 };
+  if (!day) {
+    // A re-check that now finds no sales must also remove a previously
+    // imported row (e.g. after a business-day-window change, spillover sales
+    // moved to the night they belong to — leaving the old row would count
+    // that revenue twice).
+    await pool.query(
+      `DELETE FROM pos_sales
+        WHERE location_id = $1 AND business_date = $2 AND source = $3::pos_source`,
+      [intRow.location_id, businessDate, POS_SOURCE[intRow.provider] ?? 'manual'],
+    );
+    return { imported: false, skipped: false, depositsExpected: 0 };
+  }
 
   const source = POS_SOURCE[intRow.provider] ?? 'manual';
   const net = day.grossSales - day.discounts - day.comps;

@@ -92,6 +92,38 @@ async function cloverDiscountCents(
   return total;
 }
 
+/** Epoch millis of `date` at `hour`:00 local time in `tz` (DST-safe). */
+export function zonedEpoch(tz: string, date: string, hour: number): number {
+  const want = Date.parse(`${date}T${String(hour).padStart(2, '0')}:00:00Z`);
+  let ts = want;
+  for (let i = 0; i < 2; i++) {
+    const parts = new Intl.DateTimeFormat('en-CA', {
+      timeZone: tz, hour12: false,
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+    }).formatToParts(new Date(ts));
+    const get = (t: string) => parts.find((p) => p.type === t)!.value;
+    const hh = get('hour') === '24' ? '00' : get('hour');
+    const asUtc = Date.parse(`${get('year')}-${get('month')}-${get('day')}T${hh}:${get('minute')}:${get('second')}Z`);
+    ts += want - asUtc;
+  }
+  return ts;
+}
+
+const nextDate = (date: string): string =>
+  new Date(Date.parse(`${date}T12:00:00Z`) + 86_400_000).toISOString().slice(0, 10);
+
+/**
+ * A hospitality business day is NOT the calendar day: service that opens at
+ * 7pm and closes at 2–5am belongs entirely to the night it started. Day D
+ * covers [D at cutoff, D+1 at cutoff) in the merchant's timezone; cutoff
+ * defaults to 6am (creds.day_cutoff_hour overrides).
+ */
+export const dayCutoffHour = (creds: Record<string, string>): number => {
+  const h = Number(creds.day_cutoff_hour ?? 6);
+  return Number.isInteger(h) && h >= 0 && h <= 12 ? h : 6;
+};
+
 export const cloverAdapter: PosAdapter = {
   provider: 'clover',
   async fetchDay(creds, merchantId, businessDate): Promise<NormalizedPosDay | null> {
@@ -99,8 +131,9 @@ export const cloverAdapter: PosAdapter = {
     const base = creds.env === 'sandbox' ? 'https://apisandbox.dev.clover.com' : 'https://api.clover.com';
     const tz = creds.timezone ?? 'UTC';
     // Business-day window in epoch millis (Clover filters on createdTime).
-    const dayStart = Date.parse(`${businessDate}T00:00:00`);
-    const dayEnd = dayStart + 24 * 3600 * 1000;
+    const cutoff = dayCutoffHour(creds);
+    const dayStart = zonedEpoch(tz, businessDate, cutoff);
+    const dayEnd = zonedEpoch(tz, nextDate(businessDate), cutoff);
 
     const payments: CloverPayment[] = [];
     let offset = 0;
