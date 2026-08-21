@@ -107,7 +107,10 @@ interface StoreApi {
   setInvoiceStatus(id: string, status: InvoiceStatus): Promise<void>;
   recordPayment(invoiceId: string, date: string, method: string, ref?: string): Promise<void>;
   addPosDay(day: { locationId: string; date: string; gross: number; discounts: number; tax: number; tips: number }): Promise<void>;
-  connectPos(input: { provider: string; merchantId: string; apiToken: string; locationId: string; timezone?: string }): Promise<void>;
+  connectPos(input: {
+    provider: string; merchantId: string; apiToken: string; locationId: string;
+    timezone?: string; dayCutoffHour?: number;
+  }): Promise<void>;
   disconnectPos(id: string): Promise<void>;
 }
 

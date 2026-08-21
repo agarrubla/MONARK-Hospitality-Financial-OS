@@ -29,6 +29,7 @@ export default function LiveSettingsScreen() {
   const [token, setToken] = useState('');
   const [locationId, setLocationId] = useState(data.locations[0]?.id ?? '');
   const [timezone, setTimezone] = useState('America/New_York');
+  const [cutoff, setCutoff] = useState('5');
   const [savedMsg, setSavedMsg] = useState('');
 
   const locCode = (id: string | null) => data.locations.find((l) => l.id === id)?.code ?? '—';
@@ -44,7 +45,7 @@ export default function LiveSettingsScreen() {
 
   const canSave = !!provider && !!merchantId.trim() && !!token.trim() && !!locationId && !busy;
   const save = () => {
-    connectPos({ provider, merchantId: merchantId.trim(), apiToken: token.trim(), locationId, timezone })
+    connectPos({ provider, merchantId: merchantId.trim(), apiToken: token.trim(), locationId, timezone, dayCutoffHour: Number(cutoff) })
       .then(() => {
         setToken('');
         setSavedMsg('Conectado. Las ventas de los últimos 30 días se están importando — revisa VENTAS en unos minutos.');
@@ -172,6 +173,15 @@ export default function LiveSettingsScreen() {
             )}
             <SectionLabel>ZONA HORARIA DEL NEGOCIO</SectionLabel>
             <ChoiceChips options={TIMEZONES} value={timezone} onChange={setTimezone} />
+            <SectionLabel>CORTE DEL DÍA DE VENTAS</SectionLabel>
+            <ChoiceChips
+              options={[['4', '4 am'], ['5', '5 am'], ['6', '6 am'], ['7', '7 am']]}
+              value={cutoff}
+              onChange={setCutoff}
+            />
+            <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: -4, marginBottom: 8 }}>
+              El día de ventas va de esta hora a la misma hora del día siguiente — igual que el corte de tu POS. Las ventas de madrugada cuentan con la noche que las generó.
+            </Text>
             {!!lastError && (
               <Text style={{ ...fSans(500, 11), lineHeight: 16.5, color: colors.red, marginBottom: 8 }}>{lastError}</Text>
             )}

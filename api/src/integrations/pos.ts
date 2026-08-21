@@ -117,11 +117,12 @@ const nextDate = (date: string): string =>
  * A hospitality business day is NOT the calendar day: service that opens at
  * 7pm and closes at 2–5am belongs entirely to the night it started. Day D
  * covers [D at cutoff, D+1 at cutoff) in the merchant's timezone; cutoff
- * defaults to 6am (creds.day_cutoff_hour overrides).
+ * defaults to 5am — matching Clover's own 5-to-5 reporting day — and
+ * creds.day_cutoff_hour overrides per integration.
  */
 export const dayCutoffHour = (creds: Record<string, string>): number => {
-  const h = Number(creds.day_cutoff_hour ?? 6);
-  return Number.isInteger(h) && h >= 0 && h <= 12 ? h : 6;
+  const h = Number(creds.day_cutoff_hour ?? 5);
+  return Number.isInteger(h) && h >= 0 && h <= 12 ? h : 5;
 };
 
 export const cloverAdapter: PosAdapter = {

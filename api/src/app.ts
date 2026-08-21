@@ -468,7 +468,8 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
     const ctx = await authenticate(req, reply);
     if (!ctx) return;
     const b = req.body as {
-      provider: string; merchantId: string; apiToken: string; locationId: string; timezone?: string;
+      provider: string; merchantId: string; apiToken: string; locationId: string;
+      timezone?: string; dayCutoffHour?: number;
     };
     if (!POS_SET.has(b.provider) || !b.merchantId?.trim() || !b.apiToken?.trim() || !b.locationId) {
       return reply.code(400).send({ error: 'Faltan datos: proveedor, Merchant ID, token y local son obligatorios.' });
@@ -482,6 +483,10 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
       api_token: b.apiToken.trim(),
       timezone: b.timezone?.trim() || 'America/New_York',
     };
+    // Business-day cutoff (5am default = Clover's 5-to-5 reporting day).
+    if (Number.isInteger(b.dayCutoffHour) && b.dayCutoffHour! >= 0 && b.dayCutoffHour! <= 12) {
+      creds.day_cutoff_hour = String(b.dayCutoffHour);
+    }
     const check = await verifyPos(b.provider, b.merchantId.trim(), creds);
     if (!check.ok) return reply.code(400).send({ error: check.error ?? 'El proveedor rechazó las credenciales.' });
 
