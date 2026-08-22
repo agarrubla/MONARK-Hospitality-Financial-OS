@@ -212,6 +212,29 @@ export default function LiveSettingsScreen() {
           </View>
 
           <View>
+            <SectionLabel>CORREO DE FACTURAS</SectionLabel>
+            <View style={{ ...card, padding: 14 }}>
+              <Text style={{ ...fSans(400, 11.5), lineHeight: 17, color: colors.textSecondary2 }}>
+                Las facturas que lleguen a tu correo entran solas a FACTURAS como "Por aprobar", y al aprobarlas el proveedor recibe aviso automático desde facturas@monarkhospitality.com.
+              </Text>
+              <Text style={{ ...fSans(600, 10.5, 0.06), color: colors.textSecondary2, marginTop: 10 }}>DIRECCIÓN DE ENTRADA DE MONARK</Text>
+              <Pressable
+                onPress={() => {
+                  const g = globalThis as unknown as { navigator?: { clipboard?: { writeText(t: string): Promise<void> } } };
+                  void g.navigator?.clipboard?.writeText('facturas@in.monarkhospitality.com');
+                  setSavedMsg('Dirección copiada al portapapeles.');
+                }}
+                style={{ marginTop: 4, backgroundColor: colors.appBg, borderRadius: 8, paddingVertical: 8, paddingHorizontal: 10, borderWidth: 1, borderColor: colors.sheetHandle }}
+              >
+                <Text style={{ ...fMono(600, 11.5), color: colors.text }}>facturas@in.monarkhospitality.com  ⧉</Text>
+              </Pressable>
+              <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: 8 }}>
+                ¿Quieres alimentar MONARK desde otro buzón (o cambiarlo)? Solo configura en ese correo un reenvío automático hacia esta dirección — cualquier buzón que reenvíe aquí funciona, sin tocar nada más.
+              </Text>
+            </View>
+          </View>
+
+          <View>
             <SectionLabel>MÓDULO</SectionLabel>
             <View style={{ ...card, padding: 14 }}>
               <Text style={{ ...fSans(400, 11.5), lineHeight: 17, color: colors.textSecondary2 }}>
