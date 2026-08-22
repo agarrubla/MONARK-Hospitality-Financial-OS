@@ -20,10 +20,22 @@ export default function LiveReportsScreen() {
     data.invoices.forEach((i) => set.add(monthOf(i.expenseDate)));
     data.payments.forEach((p) => set.add(monthOf(p.date)));
     data.posDays.forEach((p) => set.add(monthOf(p.date)));
-    return [...set].sort().reverse();
+    // Continuous range from the earliest data month to today — no gaps.
+    const sorted = [...set].sort();
+    const first = sorted[0] ?? thisMonth;
+    const out: string[] = [];
+    let [y, mo] = first.split('-').map(Number);
+    const [cy, cm] = thisMonth.split('-').map(Number);
+    while (y! < cy! || (y === cy && mo! <= cm!)) {
+      out.push(`${y}-${String(mo).padStart(2, '0')}`);
+      mo!++;
+      if (mo! > 12) { mo = 1; y!++; }
+    }
+    return out.reverse();
   }, [data, thisMonth]);
 
   const [month, setMonth] = useState(thisMonth);
+  const [pickerOpen, setPickerOpen] = useState(false);
   const [view, setView] = useState<'pl' | 'cash' | 'avc'>('pl');
 
   const revenue = revenueByMonth(data).get(month) ?? 0;
@@ -55,10 +67,14 @@ export default function LiveReportsScreen() {
 
   return (
     <View style={{ flex: 1, backgroundColor: colors.appBg }}>
-      <Header title="REPORTES" sub={`Con tus datos · ${monthLabel(month)}`} />
+      <Header title="REPORTES" sub={`Con tus datos · ${monthLabel(month)}${data.periods.some((pr) => pr.month.startsWith(month) && pr.status === 'locked') ? ' · 🔒 mes cerrado' : ''}`} />
 
       <View style={{ backgroundColor: colors.ink, paddingHorizontal: 14, paddingBottom: 12 }}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4, paddingBottom: 2 }}>
+        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+          <Pressable onPress={() => setPickerOpen(true)} style={{ borderRadius: 6, paddingVertical: 5, paddingHorizontal: 9, backgroundColor: colors.inkSecondary }}>
+            <Text style={{ fontSize: 12, color: colors.gold }}>📅</Text>
+          </Pressable>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 4, paddingBottom: 2 }}>
           {months.map((m) => {
             const on = month === m;
             return (
@@ -67,7 +83,8 @@ export default function LiveReportsScreen() {
               </Pressable>
             );
           })}
-        </ScrollView>
+          </ScrollView>
+        </View>
         <View style={{ flexDirection: 'row', gap: 4, marginTop: 6 }}>
           {([['pl', 'P&L'], ['cash', 'CAJA'], ['avc', 'DEVENGO VS CAJA']] as const).map(([id, label]) => {
             const on = view === id;
@@ -131,6 +148,37 @@ export default function LiveReportsScreen() {
           </>
         )}
       </ScrollView>
+      {pickerOpen && (
+        <Pressable
+          onPress={() => setPickerOpen(false)}
+          style={{ position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,32,25,0.55)', justifyContent: 'center', padding: 24 }}
+        >
+          <Pressable onPress={() => {}} style={{ backgroundColor: colors.card, borderRadius: 16, padding: 16, maxHeight: '80%' }}>
+            <Text style={{ ...fSans(600, 13), color: colors.text, marginBottom: 10 }}>Elige el mes</Text>
+            <ScrollView>
+              {[...new Set(months.map((m) => m.slice(0, 4)))].map((year) => (
+                <View key={year} style={{ marginBottom: 12 }}>
+                  <Text style={{ ...fMono(600, 11, 0.06), color: colors.textSecondary2, marginBottom: 6 }}>{year}</Text>
+                  <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6 }}>
+                    {months.filter((m) => m.startsWith(year)).map((m) => {
+                      const on = month === m;
+                      return (
+                        <Pressable
+                          key={m}
+                          onPress={() => { setMonth(m); setPickerOpen(false); }}
+                          style={{ borderRadius: 8, paddingVertical: 8, paddingHorizontal: 12, backgroundColor: on ? colors.ink : colors.appBg, borderWidth: 1, borderColor: on ? colors.ink : colors.cardBorder }}
+                        >
+                          <Text style={{ ...fMono(600, 11), color: on ? colors.gold : colors.text }}>{monthLabel(m)}</Text>
+                        </Pressable>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
+            </ScrollView>
+          </Pressable>
+        </Pressable>
+      )}
     </View>
   );
 }

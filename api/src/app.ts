@@ -357,6 +357,12 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
             ORDER BY bt.posted_at DESC, bt.id DESC LIMIT 200`,
         )
       ).rows;
+      const periods = (
+        await c.query(
+          `SELECT period_month::text AS month, status::text AS status
+             FROM financial_periods ORDER BY period_month DESC LIMIT 24`,
+        )
+      ).rows;
       const insights = (
         await c.query(
           `SELECT id, kind::text AS kind, title, body, severity::text AS severity,
@@ -375,7 +381,7 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
       ).rows;
       return {
         orgName: org?.name ?? '', locations, vendors, categories, invoices, posDays, payments,
-        bankAccounts, bankTxns, bankIntegrations, insights,
+        bankAccounts, bankTxns, bankIntegrations, insights, periods,
       };
     }).then(async (state) => {
       // Reconciliation data (service context with explicit org filters — the
@@ -628,6 +634,77 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
       if (msg.includes('vault')) return reply.code(400).send({ error: 'La IA aún no está configurada en el servidor.' });
       return reply.code(502).send({ error: `No se pudo leer la factura: ${msg}` });
     }
+  });
+
+  /* ── Cierre de mes (candado contable) ──────────────────────────────────── */
+
+  app.post('/periods/close', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const { month } = req.body as { month?: string };
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'Mes inválido.' });
+    const first = `${month}-01`;
+    if (first >= new Date().toISOString().slice(0, 7) + '-01') {
+      return reply.code(400).send({ error: 'Solo se pueden cerrar meses ya terminados.' });
+    }
+    return asUser(ctx, async (c) => {
+      await c.query(
+        `INSERT INTO financial_periods (organization_id, period_month, starts_on, ends_on, status, locked_by, locked_at)
+         VALUES ($1, $2::date, $2::date, ($2::date + interval '1 month' - interval '1 day')::date, 'locked', $3, now())
+         ON CONFLICT (organization_id, period_month)
+         DO UPDATE SET status = 'locked', locked_by = $3, locked_at = now()`,
+        [ctx.orgId, first, ctx.userId],
+      );
+      return { ok: true };
+    });
+  });
+
+  app.post('/periods/reopen', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const { month } = req.body as { month?: string };
+    if (!month || !/^\d{4}-\d{2}$/.test(month)) return reply.code(400).send({ error: 'Mes inválido.' });
+    // The schema demands an approved period_lock approval to unlock — v1
+    // single-user policy: the org's system approver signs it (same pattern as
+    // payment approvals), recorded in the audit trail.
+    const period = (
+      await pool.query(
+        `SELECT id FROM financial_periods WHERE organization_id = $1 AND period_month = $2::date AND status = 'locked'`,
+        [ctx.orgId, `${month}-01`],
+      )
+    ).rows[0];
+    if (!period) return reply.code(404).send({ error: 'Ese mes no está cerrado.' });
+    const org = (
+      await pool.query(`SELECT settings FROM organizations WHERE id = $1`, [ctx.orgId])
+    ).rows[0];
+    const approverId = org?.settings?.system_approver_id;
+    if (!approverId) return reply.code(409).send({ error: 'La organización no tiene política de aprobación configurada.' });
+    // Approvals are immutable state machines: created pending, decided after.
+    const appr = await pool.query(
+      `INSERT INTO approvals (organization_id, subject_type, subject_id, step, approver_id, decision, policy_snapshot)
+       VALUES ($1, 'period_lock', $2, 1, $3, 'pending', $4::jsonb)
+       ON CONFLICT (subject_type, subject_id, step, approver_id) DO NOTHING
+       RETURNING id`,
+      [ctx.orgId, period.id, approverId, JSON.stringify({ policy: 'auto-v1-single-user', requested_by: ctx.userId })],
+    );
+    const apprId = appr.rows[0]?.id ?? (
+      await pool.query(
+        `SELECT id FROM approvals WHERE subject_type = 'period_lock' AND subject_id = $1 AND approver_id = $2`,
+        [period.id, approverId],
+      )
+    ).rows[0]?.id;
+    await pool.query(
+      `UPDATE approvals SET decision = 'approved', decided_at = now(), note = 'Reapertura solicitada por el propietario'
+        WHERE id = $1 AND decision = 'pending'`,
+      [apprId],
+    );
+    return asUser(ctx, async (c) => {
+      await c.query(
+        `UPDATE financial_periods SET status = 'open', locked_by = NULL, locked_at = NULL WHERE id = $1`,
+        [period.id],
+      );
+      return { ok: true };
+    });
   });
 
   /* ── IA: asistente financiero (solo lee, nunca actúa) ──────────────────── */

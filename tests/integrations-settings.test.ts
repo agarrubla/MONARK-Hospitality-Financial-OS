@@ -175,3 +175,39 @@ describe('device linking', () => {
     expect(again.statusCode).toBe(404);
   });
 });
+
+describe('month close', () => {
+  it('locks a past month and the DB then refuses financial writes into it', async () => {
+    const close = await call('POST', '/periods/close', { month: '2026-07' });
+    if (close.statusCode !== 200) console.log('CLOSE ERROR:', close.body);
+    expect(close.statusCode).toBe(200);
+    const st = await state();
+    expect(st.periods.some((p: { month: string; status: string }) => p.month.startsWith('2026-07') && p.status === 'locked')).toBe(true);
+
+    // A financial write into the locked month must be rejected by the DB.
+    const inv = await call('POST', '/invoices', {
+      vendorName: 'Proveedor Julio', locationId, number: 'JUL-001',
+      invoiceDate: '2026-07-10', expenseDate: '2026-07-10',
+      categoryId: st.categories[0].id, subtotal: 100, tax: 0,
+    });
+    expect(inv.statusCode).toBeGreaterThanOrEqual(400);
+
+    const reopen = await call('POST', '/periods/reopen', { month: '2026-07' });
+    if (reopen.statusCode !== 200) console.log('REOPEN ERROR:', reopen.body);
+    expect(reopen.statusCode).toBe(200);
+    const inv2 = await call('POST', '/invoices', {
+      vendorName: 'Proveedor Julio', locationId, number: 'JUL-001',
+      invoiceDate: '2026-07-10', expenseDate: '2026-07-10',
+      categoryId: st.categories[0].id, subtotal: 100, tax: 0,
+    });
+    if (inv2.statusCode !== 200) console.log('INV2 ERROR:', inv2.body);
+    expect(inv2.statusCode).toBe(200);
+  });
+
+  it('refuses closing the current or future month', async () => {
+    const now = new Date();
+    const ym = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+    const res = await call('POST', '/periods/close', { month: ym });
+    expect(res.statusCode).toBe(400);
+  });
+});

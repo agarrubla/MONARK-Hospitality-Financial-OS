@@ -156,6 +156,11 @@ export interface Insight {
   createdAt: string;
 }
 
+export interface Period {
+  month: string; // 'YYYY-MM-01'
+  status: string; // 'open' | 'closing' | 'locked'
+}
+
 export interface PosIntegration {
   id: string;
   provider: string;
@@ -181,9 +186,10 @@ interface AppData {
   depositSuggestions: DepositSuggestion[];
   matchCandidates: MatchCandidate[];
   insights: Insight[];
+  periods: Period[];
 }
 
-const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [], deposits: [], depositSuggestions: [], matchCandidates: [], insights: [] };
+const EMPTY: AppData = { orgName: '', locations: [], vendors: [], categories: [], invoices: [], payments: [], posDays: [], integrations: [], bankAccounts: [], bankTxns: [], bankIntegrations: [], deposits: [], depositSuggestions: [], matchCandidates: [], insights: [], periods: [] };
 
 export const monthOf = (isoDate: string): string => isoDate.slice(0, 7);
 export const todayISO = (): string => new Date().toISOString().slice(0, 10);
@@ -229,6 +235,8 @@ interface StoreApi {
   confirmDepositGroup(depositIds: string[], bankTransactionIds: string[]): Promise<void>;
   confirmPaymentMatch(paymentId: string, bankTransactionId: string): Promise<void>;
   askAI(question: string, history: Array<{ q: string; a: string }>): Promise<string>;
+  closeMonth(month: string): Promise<void>;
+  reopenMonth(month: string): Promise<void>;
   generateLinkCode(): Promise<string>;
   redeemLinkCode(code: string): Promise<void>;
   setInsightStatus(id: string, status: 'acknowledged' | 'actioned' | 'dismissed'): Promise<void>;
@@ -425,6 +433,16 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       confirmPaymentMatch: (paymentId, bankTransactionId) =>
         run(async () => {
           await api('POST', '/reconcile/payment', { paymentId, bankTransactionId });
+          await refresh();
+        }),
+      closeMonth: (month) =>
+        run(async () => {
+          await api('POST', '/periods/close', { month });
+          await refresh();
+        }),
+      reopenMonth: (month) =>
+        run(async () => {
+          await api('POST', '/periods/reopen', { month });
           await refresh();
         }),
       generateLinkCode: async () => {

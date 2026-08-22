@@ -23,7 +23,7 @@ const TIMEZONES: Array<[string, string]> = [
 ];
 
 export default function LiveSettingsScreen() {
-  const { data, connectPos, disconnectPos, bankLinkToken, bankExchange, generateLinkCode, redeemLinkCode, busy, lastError, clearError } = useStore();
+  const { data, connectPos, disconnectPos, bankLinkToken, bankExchange, generateLinkCode, redeemLinkCode, addLocation, closeMonth, reopenMonth, busy, lastError, clearError } = useStore();
   const [view, setView] = useState<'list' | 'form'>('list');
   const [bankConnecting, setBankConnecting] = useState(false);
   const [provider, setProvider] = useState('clover');
@@ -36,6 +36,8 @@ export default function LiveSettingsScreen() {
   const [linkCode, setLinkCode] = useState('');
   const [redeemInput, setRedeemInput] = useState('');
   const [linkMsg, setLinkMsg] = useState('');
+  const [newLocName, setNewLocName] = useState('');
+  const [newLocCode, setNewLocCode] = useState('');
 
   const locCode = (id: string | null) => data.locations.find((l) => l.id === id)?.code ?? '—';
   const openForm = (prov?: string, merchant?: string) => {
@@ -234,6 +236,73 @@ export default function LiveSettingsScreen() {
               <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: 8 }}>
                 ¿Quieres alimentar MONARK desde otro buzón (o cambiarlo)? Solo configura en ese correo un reenvío automático hacia esta dirección — cualquier buzón que reenvíe aquí funciona, sin tocar nada más.
               </Text>
+            </View>
+          </View>
+
+          <View>
+            <SectionLabel>LOCALES</SectionLabel>
+            <View style={{ ...card, padding: 14 }}>
+              {data.locations.map((l) => (
+                <Text key={l.id} style={{ ...fSans(500, 12), color: colors.text, marginBottom: 4 }}>
+                  {l.name} <Text style={{ ...fMono(500, 10.5), color: colors.muted }}>({l.code})</Text>
+                </Text>
+              ))}
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 8 }}>
+                <View style={{ flex: 1.4 }}>
+                  <Field label="NUEVO LOCAL" value={newLocName} onChange={setNewLocName} placeholder="nombre" />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Field label="CÓDIGO" value={newLocCode} onChange={(t) => setNewLocCode(t.toUpperCase())} placeholder="CÓDIGO" mono />
+                </View>
+              </View>
+              <PrimaryButton
+                label="+ Agregar local"
+                disabled={busy || !newLocName.trim() || !newLocCode.trim()}
+                onPress={() => {
+                  addLocation(newLocName.trim(), newLocCode.trim())
+                    .then(() => { setNewLocName(''); setNewLocCode(''); setSavedMsg('Local agregado.'); })
+                    .catch(() => {});
+                }}
+              />
+            </View>
+          </View>
+
+          <View>
+            <SectionLabel>CIERRE DE MES</SectionLabel>
+            <View style={{ ...card, padding: 14 }}>
+              <Text style={{ ...fSans(400, 11), lineHeight: 16, color: colors.textSecondary2, marginBottom: 8 }}>
+                Cerrar un mes lo deja bajo candado contable: nada ni nadie puede crear, mover o anular cifras de ese mes. Las correcciones posteriores entran como ajustes en el mes abierto.
+              </Text>
+              {(() => {
+                const now = new Date();
+                const rows = [] as Array<{ ym: string; locked: boolean }>;
+                for (let k = 1; k <= 4; k++) {
+                  const d = new Date(now.getFullYear(), now.getMonth() - k, 1);
+                  const ym = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+                  const locked = data.periods.some((pr) => pr.month.startsWith(ym) && pr.status === 'locked');
+                  rows.push({ ym, locked });
+                }
+                return rows.map(({ ym, locked }) => (
+                  <View key={ym} style={{ flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 7, borderTopWidth: 1, borderTopColor: colors.divider }}>
+                    <Text style={{ ...fMono(600, 12), color: colors.text, flex: 1 }}>{ym}</Text>
+                    <Text style={{ ...fSans(600, 9.5, 0.06), color: locked ? colors.green : colors.muted }}>
+                      {locked ? '🔒 CERRADO' : 'ABIERTO'}
+                    </Text>
+                    <Pressable
+                      disabled={busy}
+                      onPress={() => {
+                        if (locked) { void reopenMonth(ym).catch(() => {}); }
+                        else { void closeMonth(ym).catch(() => {}); }
+                      }}
+                      style={{ borderRadius: 7, paddingVertical: 6, paddingHorizontal: 10, backgroundColor: locked ? colors.card : colors.ink, borderWidth: locked ? 1 : 0, borderColor: colors.cardBorder }}
+                    >
+                      <Text style={{ ...fSans(600, 10.5), color: locked ? colors.textSecondary2 : colors.gold }}>
+                        {locked ? 'Reabrir' : 'Cerrar mes'}
+                      </Text>
+                    </Pressable>
+                  </View>
+                ));
+              })()}
             </View>
           </View>
 

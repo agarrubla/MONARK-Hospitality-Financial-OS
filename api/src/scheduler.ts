@@ -164,7 +164,36 @@ async function runDetectors(pool: pg.Pool): Promise<void> {
          RETURNING id`,
         [o.id],
       );
-      const n = Number(dup.n) + Number(cross.n) + (fees.rowCount ?? 0);
+      // Expected deposits long past their date, for orgs whose bank feed is
+      // live (without a bank there is nothing to contrast against).
+      const missing = await pool.query(
+        `WITH banked AS (
+           SELECT 1 FROM integrations
+            WHERE organization_id = $1 AND provider::text IN ('plaid', 'belvo') AND status = 'connected' LIMIT 1
+         )
+         UPDATE pos_deposits d SET status = 'missing'
+          WHERE d.organization_id = $1 AND d.status = 'expected'
+            AND d.expected_on < CURRENT_DATE - 4
+            AND EXISTS (SELECT 1 FROM banked)
+          RETURNING d.id, d.deposit_type, d.covers_from, d.expected_amount`,
+        [o.id],
+      );
+      for (const dep of missing.rows) {
+        await pool.query(
+          `INSERT INTO ai_insights (organization_id, kind, subject_type, subject_id, title, body,
+                                    confidence, severity, evidence, model_version)
+           SELECT $1, 'cash_risk', 'pos_deposits', $2,
+                  'Depósito esperado no llegó',
+                  format('El depósito de %s de las ventas del %s por $%s no ha llegado al banco. Revisa con el procesador.',
+                         CASE WHEN $3 = 'card_batch' THEN 'tarjetas' ELSE 'efectivo' END, $4, $5),
+                  0.90, 'critical',
+                  jsonb_build_object('pos_deposit_id', $2, 'expected_amount', $5),
+                  'detector-v1'
+            WHERE NOT EXISTS (SELECT 1 FROM ai_insights i WHERE i.kind = 'cash_risk' AND i.subject_id = $2)`,
+          [o.id, dep.id, dep.deposit_type, dep.covers_from, dep.expected_amount],
+        );
+      }
+      const n = Number(dup.n) + Number(cross.n) + (fees.rowCount ?? 0) + (missing.rowCount ?? 0);
       if (n) console.log(`detectors org ${o.id}: ${n} new insight(s)`);
     } catch (err) {
       console.error(`detectors ${o.id}: ${(err as Error).message}`);
