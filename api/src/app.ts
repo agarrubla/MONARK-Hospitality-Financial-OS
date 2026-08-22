@@ -569,7 +569,8 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
         console.error(`email inbound ${att.filename}:`, msg);
       }
     }
-    console.log(`email inbound de ${fromEmail ?? '?'}: ${created} creadas${skipped.length ? `, saltadas: ${skipped.join('; ')}` : ''}`);
+    const subject = (data as { subject?: string }).subject ?? '';
+    console.log(`email inbound de ${fromEmail ?? '?'} · asunto: "${subject.slice(0, 120)}" · ${created} creadas${skipped.length ? `, saltadas: ${skipped.join('; ')}` : ''}`);
     return { ok: true, created, skipped };
   });
 
