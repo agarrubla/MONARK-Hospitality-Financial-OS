@@ -258,6 +258,40 @@ export function buildProductApp(pool: pg.Pool, opts: ProductAppOptions = {}): Fa
 
   /* ── State (everything the app renders) ────────────────────────────────── */
 
+  /* ── Vinculación de dispositivos (código de un solo uso) ───────────────── */
+  // Sin login propio, la sesión es por dispositivo. Un código efímero mueve
+  // las credenciales de dispositivo a otro navegador para compartir la MISMA
+  // organización. Un solo uso, 10 minutos, verificado contra el usuario dueño
+  // de la sesión que lo genera.
+  const linkCodes = new Map<string, { email: string; password: string; expiresAt: number }>();
+
+  app.post('/auth/link-code', async (req, reply) => {
+    const ctx = await authenticate(req, reply);
+    if (!ctx) return;
+    const b = req.body as { email?: string; password?: string };
+    if (!b.email || !b.password) return reply.code(400).send({ error: 'Faltan las credenciales del dispositivo.' });
+    const user = (
+      await pool.query(`SELECT id, email, password_hash FROM users WHERE id = $1`, [ctx.userId])
+    ).rows[0];
+    if (!user || user.email !== b.email || !verifyPassword(b.password, user.password_hash)) {
+      return reply.code(401).send({ error: 'Las credenciales no corresponden a esta sesión.' });
+    }
+    const code = randomBytes(6).toString('base64url').replace(/[-_]/g, 'X').toUpperCase().slice(0, 8);
+    linkCodes.set(code, { email: b.email, password: b.password, expiresAt: Date.now() + 10 * 60_000 });
+    setTimeout(() => linkCodes.delete(code), 10 * 60_000).unref();
+    return { code, expiresInMinutes: 10 };
+  });
+
+  app.post('/auth/link-redeem', async (req, reply) => {
+    const { code } = req.body as { code?: string };
+    const entry = code ? linkCodes.get(code.trim().toUpperCase()) : undefined;
+    if (!entry || entry.expiresAt < Date.now()) {
+      return reply.code(404).send({ error: 'Código inválido o vencido — genera uno nuevo en el otro dispositivo.' });
+    }
+    linkCodes.delete(code!.trim().toUpperCase());
+    return { email: entry.email, password: entry.password };
+  });
+
   app.get('/state', async (req, reply) => {
     const ctx = await authenticate(req, reply);
     if (!ctx) return;

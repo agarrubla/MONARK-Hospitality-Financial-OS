@@ -23,7 +23,7 @@ const TIMEZONES: Array<[string, string]> = [
 ];
 
 export default function LiveSettingsScreen() {
-  const { data, connectPos, disconnectPos, bankLinkToken, bankExchange, busy, lastError, clearError } = useStore();
+  const { data, connectPos, disconnectPos, bankLinkToken, bankExchange, generateLinkCode, redeemLinkCode, busy, lastError, clearError } = useStore();
   const [view, setView] = useState<'list' | 'form'>('list');
   const [bankConnecting, setBankConnecting] = useState(false);
   const [provider, setProvider] = useState('clover');
@@ -33,6 +33,9 @@ export default function LiveSettingsScreen() {
   const [timezone, setTimezone] = useState('America/New_York');
   const [cutoff, setCutoff] = useState('5');
   const [savedMsg, setSavedMsg] = useState('');
+  const [linkCode, setLinkCode] = useState('');
+  const [redeemInput, setRedeemInput] = useState('');
+  const [linkMsg, setLinkMsg] = useState('');
 
   const locCode = (id: string | null) => data.locations.find((l) => l.id === id)?.code ?? '—';
   const openForm = (prov?: string, merchant?: string) => {
@@ -230,6 +233,61 @@ export default function LiveSettingsScreen() {
               </Pressable>
               <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: 8 }}>
                 ¿Quieres alimentar MONARK desde otro buzón (o cambiarlo)? Solo configura en ese correo un reenvío automático hacia esta dirección — cualquier buzón que reenvíe aquí funciona, sin tocar nada más.
+              </Text>
+            </View>
+          </View>
+
+          <View>
+            <SectionLabel>MIS DISPOSITIVOS</SectionLabel>
+            <View style={{ ...card, padding: 14 }}>
+              <Text style={{ ...fSans(400, 11.5), lineHeight: 17, color: colors.textSecondary2 }}>
+                Tu cuenta vive en cada dispositivo. Para ver los mismos datos en tu celular, computador u otro navegador, vincúlalos con un código de un solo uso (vale 10 minutos).
+              </Text>
+
+              <Text style={{ ...fSans(600, 10.5, 0.06), color: colors.textSecondary2, marginTop: 12 }}>ESTE DISPOSITIVO TIENE MIS DATOS</Text>
+              {linkCode ? (
+                <View style={{ marginTop: 6, backgroundColor: colors.ink, borderRadius: 10, padding: 14, alignItems: 'center' }}>
+                  <Text style={{ ...fMono(700, 26, 0.2), color: colors.gold }}>{linkCode}</Text>
+                  <Text style={{ ...fSans(400, 10.5), color: '#c7d4cd', marginTop: 6, textAlign: 'center' }}>
+                    Escribe este código en el otro dispositivo (AJUSTES → Vincular). Vence en 10 minutos.
+                  </Text>
+                </View>
+              ) : (
+                <View style={{ marginTop: 6 }}>
+                  <PrimaryButton
+                    label={busy ? 'Generando…' : 'Generar código para otro dispositivo'}
+                    disabled={busy}
+                    onPress={() => {
+                      setLinkMsg('');
+                      generateLinkCode()
+                        .then(setLinkCode)
+                        .catch((e: Error) => setLinkMsg(e.message));
+                    }}
+                  />
+                </View>
+              )}
+
+              <Text style={{ ...fSans(600, 10.5, 0.06), color: colors.textSecondary2, marginTop: 14 }}>MIS DATOS ESTÁN EN OTRO DISPOSITIVO</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginTop: 6 }}>
+                <View style={{ flex: 1 }}>
+                  <Field label="" value={redeemInput} onChange={(t) => setRedeemInput(t.toUpperCase())} placeholder="código de 8 letras" mono />
+                </View>
+              </View>
+              <PrimaryButton
+                label={busy ? 'Vinculando…' : 'Vincular este dispositivo'}
+                disabled={busy || redeemInput.trim().length < 6}
+                onPress={() => {
+                  setLinkMsg('');
+                  redeemLinkCode(redeemInput.trim())
+                    .then(() => { setRedeemInput(''); setLinkMsg('✓ Dispositivo vinculado — ya ves los datos de tu negocio.'); })
+                    .catch(() => {});
+                }}
+              />
+              {!!linkMsg && (
+                <Text style={{ ...fSans(500, 11), lineHeight: 16, color: linkMsg.startsWith('✓') ? colors.green : colors.red, marginTop: 8 }}>{linkMsg}</Text>
+              )}
+              <Text style={{ ...fSans(400, 10), lineHeight: 15, color: colors.muted, marginTop: 8 }}>
+                Al vincular, este navegador pasa a mostrar la organización del código y deja atrás la que tuviera. La vinculación desaparecerá cuando llegue el login central de la super app.
               </Text>
             </View>
           </View>

@@ -28,6 +28,13 @@ export async function getDeviceCreds(): Promise<{ email: string; password: strin
   return email && password ? { email, password } : null;
 }
 
+export async function saveDeviceCreds(creds: { email: string; password: string }): Promise<void> {
+  await Promise.all([
+    AsyncStorage.setItem(DEV_EMAIL_KEY, creds.email),
+    AsyncStorage.setItem(DEV_PASS_KEY, creds.password),
+  ]);
+}
+
 export async function createDeviceCreds(): Promise<{ email: string; password: string }> {
   const rand = (len: number): string => {
     let s = '';

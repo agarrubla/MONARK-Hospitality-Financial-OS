@@ -5,7 +5,7 @@
  * paying an August invoice in September never creates a September expense.
  */
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
-import { api, ApiError, clearToken, createDeviceCreds, getDeviceCreds, getToken, setToken } from '../api/client';
+import { api, ApiError, clearToken, createDeviceCreds, getDeviceCreds, getToken, saveDeviceCreds, setToken } from '../api/client';
 
 export interface Location { id: string; name: string; code: string }
 export interface Vendor { id: string; name: string }
@@ -229,6 +229,8 @@ interface StoreApi {
   confirmDepositGroup(depositIds: string[], bankTransactionIds: string[]): Promise<void>;
   confirmPaymentMatch(paymentId: string, bankTransactionId: string): Promise<void>;
   askAI(question: string, history: Array<{ q: string; a: string }>): Promise<string>;
+  generateLinkCode(): Promise<string>;
+  redeemLinkCode(code: string): Promise<void>;
   setInsightStatus(id: string, status: 'acknowledged' | 'actioned' | 'dismissed'): Promise<void>;
 }
 
@@ -423,6 +425,20 @@ export function StoreProvider({ children }: { children: React.ReactNode }) {
       confirmPaymentMatch: (paymentId, bankTransactionId) =>
         run(async () => {
           await api('POST', '/reconcile/payment', { paymentId, bankTransactionId });
+          await refresh();
+        }),
+      generateLinkCode: async () => {
+        const creds = await getDeviceCreds();
+        if (!creds) throw new Error('Este dispositivo no tiene una sesión que vincular.');
+        const res = await api<{ code: string }>('POST', '/auth/link-code', creds);
+        return res.code;
+      },
+      redeemLinkCode: (code) =>
+        run(async () => {
+          const creds = await api<{ email: string; password: string }>('POST', '/auth/link-redeem', { code });
+          await saveDeviceCreds(creds);
+          const res = await api<{ token: string }>('POST', '/auth/login', creds);
+          await setToken(res.token);
           await refresh();
         }),
       askAI: async (question, history) => {

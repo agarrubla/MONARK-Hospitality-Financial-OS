@@ -139,3 +139,39 @@ describe('POS settings', () => {
     expect(res.statusCode).toBe(400);
   });
 });
+
+describe('device linking', () => {
+  it('issues a single-use code and redeems it for the device credentials', async () => {
+    const deviceEmail = `${uniq('device')}@monark.local`;
+    const devicePass = 'clave-dispositivo-123';
+    const reg = await app.inject({
+      method: 'POST', url: '/auth/register',
+      payload: { email: deviceEmail, password: devicePass, orgName: 'Link Org' },
+    });
+    const tok = reg.json().token;
+
+    const bad = await app.inject({
+      method: 'POST', url: '/auth/link-code',
+      payload: { email: deviceEmail, password: 'incorrecta' },
+      headers: { authorization: `Bearer ${tok}` },
+    });
+    expect(bad.statusCode).toBe(401);
+
+    const gen = await app.inject({
+      method: 'POST', url: '/auth/link-code',
+      payload: { email: deviceEmail, password: devicePass },
+      headers: { authorization: `Bearer ${tok}` },
+    });
+    expect(gen.statusCode).toBe(200);
+    const code = gen.json().code;
+    expect(code).toHaveLength(8);
+
+    const redeem = await app.inject({ method: 'POST', url: '/auth/link-redeem', payload: { code } });
+    expect(redeem.statusCode).toBe(200);
+    expect(redeem.json()).toEqual({ email: deviceEmail, password: devicePass });
+
+    // single use
+    const again = await app.inject({ method: 'POST', url: '/auth/link-redeem', payload: { code } });
+    expect(again.statusCode).toBe(404);
+  });
+});
