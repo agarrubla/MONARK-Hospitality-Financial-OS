@@ -218,7 +218,7 @@ export default function LiveSettingsScreen() {
                 Este módulo financiero forma parte de la super app MONARK. La identidad vendrá del login central de la super app; por ahora la sesión pertenece a este dispositivo.
               </Text>
               <Text
-                onPress={() => { void Linking.openURL('https://wonderful-muffin-aedd73.netlify.app/privacy.html'); }}
+                onPress={() => { void Linking.openURL('https://app.monarkhospitality.com/privacy.html'); }}
                 style={{ ...fSans(600, 11.5), color: colors.green, marginTop: 10 }}
               >
                 Política de privacidad →
