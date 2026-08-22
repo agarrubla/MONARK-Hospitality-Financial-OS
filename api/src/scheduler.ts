@@ -14,6 +14,7 @@
 import pg from 'pg';
 import { dayCutoffHour } from './integrations/pos.js';
 import { resolveCredentialsFor, syncBankIntegration, syncPosIntegration } from './integrations/sync.js';
+import { buildDailyDigest, sendWhatsApp } from './notify/whatsapp.js';
 
 const POS_PROVIDERS = new Set(['clover', 'toast', 'square', 'lightspeed']);
 const BACKFILL_DAYS = Number(process.env.SYNC_BACKFILL_DAYS ?? 30);
@@ -220,6 +221,34 @@ async function syncBankAll(pool: pg.Pool): Promise<void> {
   }
 }
 
+async function sendDailyDigest(pool: pg.Pool): Promise<void> {
+  // One digest per day, after 10am in the business timezone, to the org that
+  // owns the configured POS merchant. Dedupe survives restarts via settings.
+  const tz = 'America/New_York';
+  const now = new Date();
+  const hour = Number(new Intl.DateTimeFormat('en-GB', { timeZone: tz, hour: '2-digit', hour12: false }).format(now));
+  if (hour < 10) return;
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+  const org = (
+    await pool.query(
+      `SELECT o.id, o.settings FROM organizations o
+        JOIN integrations i ON i.organization_id = o.id
+       WHERE i.provider = 'clover' AND i.external_ref = $1 LIMIT 1`,
+      [process.env.INBOUND_ORG_MERCHANT ?? ''],
+    )
+  ).rows[0];
+  if (!org || org.settings?.last_digest_date === today) return;
+  const text = await buildDailyDigest(pool, org.id);
+  const sent = await sendWhatsApp(text);
+  if (sent) {
+    await pool.query(
+      `UPDATE organizations SET settings = coalesce(settings, '{}'::jsonb) || jsonb_build_object('last_digest_date', $2::text) WHERE id = $1`,
+      [org.id, today],
+    );
+    console.log(`daily digest sent (${today})`);
+  }
+}
+
 export function startScheduler(pool: pg.Pool): void {
   const hours = Number(process.env.SYNC_INTERVAL_HOURS ?? 6);
   const tick = async () => {
@@ -228,6 +257,7 @@ export function startScheduler(pool: pg.Pool): void {
       await syncPosAll(pool);
       await syncBankAll(pool);
       await runDetectors(pool);
+      await sendDailyDigest(pool);
     } catch (err) {
       console.error('scheduler tick failed:', err);
     }
